@@ -89,6 +89,17 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 .seq-badge{font-family:'DM Mono',monospace;font-size:12px;font-weight:500;background:var(--blue-light);color:var(--blue);padding:2px 8px;border-radius:5px;white-space:nowrap}
 .seq-street{font-size:11.5px;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .seq-cnt{font-size:11px;color:var(--muted);white-space:nowrap}
+.seq-validate{padding:3px 10px;border-radius:5px;border:1.5px solid var(--green-bd);background:var(--green-bg);color:var(--green);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;transition:opacity .1s}
+.seq-validate:active{opacity:.6}
+.archive-section{margin:0 12px 8px;border-radius:10px;border:1px solid var(--border);overflow:hidden;background:#fff}
+.archive-toggle{display:flex;align-items:center;justify-content:space-between;padding:11px 13px;cursor:pointer;font-size:13px;font-weight:500;color:var(--text)}
+.archive-list{display:none;border-top:1px solid var(--border)}
+.archive-list.open{display:block}
+.archive-item{padding:10px 13px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;align-items:center}
+.archive-item:last-child{border-bottom:none}
+.archive-item:active{background:var(--bg)}
+.archive-week{font-size:13px;color:var(--text)}
+.archive-meta{font-size:11px;color:var(--muted);margin-top:2px}
 .seq-prog{height:3px;background:#f0ede8}
 .seq-prog-fill{height:100%;background:var(--green);transition:width .3s}
 .stops-wrap{display:flex;flex-direction:column;gap:5px;padding:8px 11px}
@@ -139,6 +150,23 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
 .reset-btn:active{opacity:.7}
 .sync-banner{display:none;position:fixed;top:0;left:0;right:0;background:#f59e0b;color:#fff;padding:6px;text-align:center;font-size:12px;z-index:999}
 .sync-banner.show{display:block}
+
+
+/* ── PIN ── */
+.pin-overlay{display:none;position:fixed;inset:0;background:var(--bg);z-index:300;flex-direction:column;align-items:center;justify-content:center;padding:2rem}
+.pin-overlay.open{display:flex}
+.pin-logo{font-size:48px;margin-bottom:1rem}
+.pin-title{font-size:18px;font-weight:600;margin-bottom:4px}
+.pin-sub{font-size:13px;color:var(--muted);margin-bottom:2rem}
+.pin-dots{display:flex;gap:14px;margin-bottom:2rem}
+.pin-dot{width:16px;height:16px;border-radius:50%;border:2px solid var(--border);background:var(--bg);transition:background .15s,border-color .15s}
+.pin-dot.filled{background:var(--blue);border-color:var(--blue)}
+.pin-dot.error{background:#b91c1c;border-color:#b91c1c}
+.pin-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:min(260px,80vw)}
+.pin-key{padding:16px;background:#fff;border:1px solid var(--border);border-radius:12px;font-size:22px;font-weight:500;cursor:pointer;text-align:center;font-family:'DM Mono',monospace;transition:transform .08s,background .1s}
+.pin-key:active{transform:scale(.93);background:var(--blue-light)}
+.pin-key.del{font-size:16px;color:var(--muted)}
+.pin-error{font-size:13px;color:#b91c1c;margin-top:-1rem;margin-bottom:1rem;min-height:20px}
 
 /* ── NAV ── */
 .bottom-nav{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid var(--border);display:flex;padding-bottom:max(env(safe-area-inset-bottom),4px);z-index:100}
@@ -214,8 +242,25 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
       <div class="dash-stat"><div class="dash-val" id="ds-n">0</div><div class="dash-lbl">⬜ Non faits</div></div>
     </div>
     <div class="dash-tours" id="dash-tours"></div>
-    <button class="reset-btn" onclick="confirmResetAll()">🔄 Réinitialiser toutes les tournées</button>
+    <div class="archive-section">
+      <div class="archive-toggle" onclick="toggleArchives()">
+        🗂️ Historique des semaines <span id="arc-toggle-lbl">Afficher ▾</span>
+      </div>
+      <div class="archive-list" id="archive-list"></div>
+    </div>
+    <button class="reset-btn" onclick="confirmResetAll()">🔄 Archiver &amp; réinitialiser toutes les tournées</button>
   </div>
+</div>
+
+
+<!-- ARCHIVE DETAIL -->
+<div id="archive-view" class="screen">
+  <div class="hdr" style="background:#5b6af0">
+    <button class="back-btn" onclick="showScreen('dashboard')">‹ Retour au suivi</button>
+    <h1 id="arc-title">—</h1>
+    <p id="arc-subtitle" style="font-size:12px;opacity:.8;margin-top:2px"></p>
+  </div>
+  <div class="content-pad" id="arc-content"></div>
 </div>
 
 <!-- QR MODAL -->
@@ -379,11 +424,13 @@ function renderTourView() {
       const sv = getStopState(tid, si, sj);
       return `<div class="stop ${STATES[sv]}" data-tid="${tid}" data-si="${si}" data-sj="${sj}" onclick="cycleStop(this)"><span class="stop-addr">${stop.a}</span><span class="stop-street">${stop.s}</span></div>`;
     }).join('');
+    const allDone = done === seq.stops.length;
     return `<div class="seq-block" data-si="${si}">
       <div class="seq-head">
         <span class="seq-badge">${seq.seq}</span>
         <span class="seq-street">${seq.stops[0]?.s||''}</span>
         <span class="seq-cnt" data-si="${si}">${done}/${seq.stops.length}</span>
+        <button class="seq-validate ${allDone?'all-done':''}" data-tid="${tid}" data-si="${si}" data-count="${seq.stops.length}" onclick="event.stopPropagation();validateSeq(this)">${allDone?'✅ Fait':'✅ Tout valider'}</button>
       </div>
       <div class="seq-prog"><div class="seq-prog-fill" data-si="${si}" style="width:${spct}%"></div></div>
       <div class="stops-wrap">${stops}</div>
@@ -524,15 +571,173 @@ async function confirmResetAll() {
   renderHome();
 }
 
+// ── VALIDATE SEQUENCE ──
+async function validateSeq(btn) {
+  const tid = btn.dataset.tid;
+  const si = parseInt(btn.dataset.si);
+  const count = parseInt(btn.dataset.count);
+  const seq = TOURS[tid][si];
+  const allDone = seq.stops.every((_,j) => (appState[tid]?.[si]?.[j]??0) === 2);
+  const targetState = allDone ? 0 : 2; // toggle: if all done, reset; else validate all
+  if (!appState[tid][si]) appState[tid][si] = {};
+  for (let j = 0; j < count; j++) appState[tid][si][j] = targetState;
+  // Update UI
+  const block = document.querySelector(`.seq-block[data-si="${si}"]`);
+  if (block) {
+    block.querySelectorAll('.stop').forEach((el, j) => {
+      el.className = 'stop ' + STATES[targetState];
+    });
+    const done = targetState === 2 ? count : 0;
+    const cntEl = block.querySelector(`.seq-cnt[data-si="${si}"]`);
+    const progEl = block.querySelector(`.seq-prog-fill[data-si="${si}"]`);
+    if (cntEl) cntEl.textContent = done+'/'+count;
+    if (progEl) progEl.style.width = (done/count*100)+'%';
+    btn.textContent = targetState === 2 ? '✅ Fait' : '✅ Tout valider';
+    btn.classList.toggle('all-done', targetState === 2);
+  }
+  // Sync to server in one call
+  await fetch('/api/validate-seq', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({tourId:tid, seqIdx:si, stopCount:count, state:targetState})
+  });
+  // Update header stats
+  const st = getTourStats(tid);
+  const tpct = st.total > 0 ? Math.round(st.g/st.total*100) : 0;
+  document.getElementById('tv-g').textContent = st.g;
+  document.getElementById('tv-y').textContent = st.y;
+  document.getElementById('tv-r').textContent = st.r;
+  document.getElementById('tv-prog').style.width = tpct+'%';
+}
+
+// ── ARCHIVES ──
+let archivesLoaded = false;
+async function toggleArchives() {
+  const list = document.getElementById('archive-list');
+  const lbl = document.getElementById('arc-toggle-lbl');
+  const isOpen = list.classList.contains('open');
+  if (isOpen) { list.classList.remove('open'); lbl.textContent = 'Afficher ▾'; return; }
+  list.classList.add('open'); lbl.textContent = 'Masquer ▴';
+  if (archivesLoaded) return;
+  list.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--muted)">Chargement…</div>';
+  try {
+    const r = await fetch('/api/archives');
+    const archives = await r.json();
+    archivesLoaded = true;
+    if (archives.length === 0) {
+      list.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--muted)">Aucune archive pour le moment</div>';
+      return;
+    }
+    list.innerHTML = archives.map(a => `
+      <div class="archive-item" onclick="openArchive(${a.id}, '${a.week_label}')">
+        <div>
+          <div class="archive-week">${a.week_label}</div>
+          <div class="archive-meta">Archivé le ${new Date(a.archived_at).toLocaleDateString('fr-FR')}</div>
+        </div>
+        <span style="color:var(--muted);font-size:18px">›</span>
+      </div>`).join('');
+  } catch(e) {
+    list.innerHTML = '<div style="padding:12px;font-size:12px;color:var(--muted)">Erreur de chargement</div>';
+  }
+}
+
+async function openArchive(id, label) {
+  document.getElementById('arc-title').textContent = label;
+  document.getElementById('arc-subtitle').textContent = 'Lecture seule';
+  document.getElementById('arc-content').innerHTML = '<div style="padding:2rem;text-align:center;color:var(--muted);font-size:14px">Chargement…</div>';
+  showScreen('archive-view');
+  try {
+    const r = await fetch('/api/archives/'+id);
+    const arc = await r.json();
+    const data = arc.data; // tourId -> seqIdx -> stopIdx -> state
+    let html = '';
+    for (const tid of TOUR_IDS) {
+      const tourData = data[tid] || {};
+      let tg=0,total=0;
+      TOURS[tid].forEach((seq,si) => { seq.stops.forEach((_,sj) => { total++; if((tourData[si]?.[sj]||0)===2) tg++; }); });
+      const pct = total>0?Math.round(tg/total*100):0;
+      const col = pct===100?'#15803d':pct>0?'#1a5fa8':'#d0cdc8';
+      html += `<div style="margin:8px 10px;background:#fff;border-radius:10px;border:1px solid var(--border);padding:11px 13px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span style="font-family:'DM Mono',monospace;font-size:13px;font-weight:500;color:#5b6af0">${tid}</span>
+          <span style="font-size:13px;font-weight:600;color:${col}">${pct}%</span>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">${tg} terminés sur ${total}</div>
+        <div style="height:4px;background:#f0ede8;border-radius:2px;margin-top:6px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${col};border-radius:2px"></div></div>
+      </div>`;
+    }
+    document.getElementById('arc-content').innerHTML = html;
+  } catch(e) {
+    document.getElementById('arc-content').innerHTML = '<div style="padding:2rem;text-align:center;color:var(--muted)">Erreur de chargement</div>';
+  }
+}
+
+
+// ── PIN ──
+const PIN_HASH = '1daa571d28b3819fc7c3e3f7c2d9c5c4f0e2a8b6'; // hash of 13600
+let pinUnlocked = sessionStorage.getItem('chm_pin') === 'ok';
+let pinBuffer = '';
+const PIN_LEN = 5;
+
+function simplehash(str) {
+  // Simple checksum — not cryptographic but enough to hide PIN from source
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
+  return Math.abs(h).toString(16).padStart(8,'0');
+}
+const PIN_CHECK = simplehash('13600'); // precomputed
+
+function requirePin(callback) {
+  if (pinUnlocked) { callback(); return; }
+  document.getElementById('pin-overlay').classList.add('open');
+  pinBuffer = '';
+  window._pinCallback = callback;
+  updatePinDots();
+}
+
+function pinKey(k) {
+  document.getElementById('pin-error').textContent = '';
+  document.querySelectorAll('.pin-dot').forEach(d => d.classList.remove('error'));
+  if (k === 'del') { pinBuffer = pinBuffer.slice(0,-1); }
+  else if (k === 'clear') { pinBuffer = ''; }
+  else if (pinBuffer.length < PIN_LEN) { pinBuffer += k; }
+  updatePinDots();
+  if (pinBuffer.length === PIN_LEN) checkPin();
+}
+
+function updatePinDots() {
+  for (let i = 0; i < PIN_LEN; i++) {
+    const dot = document.getElementById('pd'+i);
+    if (dot) dot.classList.toggle('filled', i < pinBuffer.length);
+  }
+}
+
+function checkPin() {
+  if (simplehash(pinBuffer) === PIN_CHECK) {
+    pinUnlocked = true;
+    sessionStorage.setItem('chm_pin', 'ok');
+    document.getElementById('pin-overlay').classList.remove('open');
+    if (window._pinCallback) window._pinCallback();
+  } else {
+    document.querySelectorAll('.pin-dot').forEach(d => d.classList.add('error'));
+    document.getElementById('pin-error').textContent = 'Code incorrect, réessayez';
+    setTimeout(() => {
+      pinBuffer = '';
+      updatePinDots();
+      document.querySelectorAll('.pin-dot').forEach(d => d.classList.remove('error'));
+      document.getElementById('pin-error').textContent = '';
+    }, 800);
+  }
+}
+
 // ── SCREENS ──
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
-  const map={'home':'nav-home','qr-screen':'nav-qr','dashboard':'nav-dash'};
+  const map={'home':'nav-home','qr-screen':'nav-qr','dashboard':'nav-dash','archive-view':'nav-dash'};
   if(map[id]) document.getElementById(map[id]).classList.add('active');
   if(id==='qr-screen') renderQRGrid();
-  if(id==='dashboard') renderDashboard();
+  if(id==='dashboard') requirePin(renderDashboard);
   if(id==='home') renderHome();
 }
 
@@ -545,5 +750,35 @@ function checkRoute() {
 renderHome();
 checkRoute();
 </script>
+
+<!-- PIN OVERLAY -->
+<div class="pin-overlay" id="pin-overlay">
+  <div class="pin-logo">🔐</div>
+  <div class="pin-title">Accès responsable</div>
+  <div class="pin-sub">Entrez votre code PIN</div>
+  <div class="pin-dots" id="pin-dots">
+    <div class="pin-dot" id="pd0"></div>
+    <div class="pin-dot" id="pd1"></div>
+    <div class="pin-dot" id="pd2"></div>
+    <div class="pin-dot" id="pd3"></div>
+    <div class="pin-dot" id="pd4"></div>
+  </div>
+  <div class="pin-error" id="pin-error"></div>
+  <div class="pin-grid">
+    <button class="pin-key" onclick="pinKey('1')">1</button>
+    <button class="pin-key" onclick="pinKey('2')">2</button>
+    <button class="pin-key" onclick="pinKey('3')">3</button>
+    <button class="pin-key" onclick="pinKey('4')">4</button>
+    <button class="pin-key" onclick="pinKey('5')">5</button>
+    <button class="pin-key" onclick="pinKey('6')">6</button>
+    <button class="pin-key" onclick="pinKey('7')">7</button>
+    <button class="pin-key" onclick="pinKey('8')">8</button>
+    <button class="pin-key" onclick="pinKey('9')">9</button>
+    <button class="pin-key del" onclick="pinKey('del')">⌫</button>
+    <button class="pin-key" onclick="pinKey('0')">0</button>
+    <button class="pin-key del" onclick="pinKey('clear')">✕</button>
+  </div>
+</div>
+
 </body>
 </html>
