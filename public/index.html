@@ -8,6 +8,7 @@
 <meta name="theme-color" content="#1a5fa8">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@500&display=swap" rel="stylesheet">
 <style>
@@ -268,7 +269,7 @@ body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(-
   <div class="modal-box" onclick="event.stopPropagation()">
     <h3 id="modal-id">—</h3>
     <p id="modal-info">—</p>
-    <canvas id="modal-canvas" width="220" height="220"></canvas>
+    <div id="modal-canvas" style="width:220px;height:220px;margin:0 auto"></div>
     <div class="modal-url" id="modal-url"></div>
     <button class="modal-close" onclick="closeModal()">Fermer</button>
   </div>
@@ -303,17 +304,65 @@ window.addEventListener('online', () => { online=true; document.getElementById('
 window.addEventListener('offline', () => { online=false; document.getElementById('sync-banner').classList.add('show'); });
 
 // ── API ──
+function lsKey(tid) { return 'chm_state_' + tid; }
+
+function saveLocal(tid) {
+  try { localStorage.setItem(lsKey(tid), JSON.stringify(appState[tid])); } catch(e) {}
+}
+
+function loadLocal(tid) {
+  try {
+    const s = localStorage.getItem(lsKey(tid));
+    return s ? JSON.parse(s) : null;
+  } catch(e) { return null; }
+}
+
 async function fetchStates(tid) {
+  // Load local cache first (instant display)
+  const local = loadLocal(tid);
+  if (local) appState[tid] = local;
+  // Then fetch from server and merge (server wins for non-zero states)
   try {
     const r = await fetch('/api/states/'+tid);
     const data = await r.json();
-    // data: {seqIdx: {stopIdx: state}}
-    appState[tid] = {};
-    Object.entries(data).forEach(([si, stops]) => {
-      appState[tid][si] = {};
-      Object.entries(stops).forEach(([sj, st]) => { appState[tid][si][sj] = st; });
-    });
-  } catch(e) { console.warn('fetchStates error', e); }
+    const serverHasData = Object.keys(data).length > 0;
+    if (serverHasData) {
+      // Server has data — it's the truth
+      appState[tid] = {};
+      Object.entries(data).forEach(([si, stops]) => {
+        appState[tid][si] = {};
+        Object.entries(stops).forEach(([sj, st]) => { appState[tid][si][sj] = parseInt(st); });
+      });
+      saveLocal(tid);
+    } else if (!local) {
+      // Neither server nor local — fresh start
+      appState[tid] = {};
+    }
+    // If server empty but local exists: local was newer (server restarted) — push local to server
+    if (!serverHasData && local) {
+      pushLocalToServer(tid);
+    }
+  } catch(e) {
+    console.warn('fetchStates offline, using local cache');
+  }
+}
+
+async function pushLocalToServer(tid) {
+  const tourData = appState[tid];
+  if (!tourData) return;
+  for (const [si, stops] of Object.entries(tourData)) {
+    for (const [sj, state] of Object.entries(stops)) {
+      if (parseInt(state) > 0) {
+        try {
+          await fetch('/api/state', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({tourId:tid, seqIdx:parseInt(si), stopIdx:parseInt(sj), state:parseInt(state)})
+          });
+        } catch(e) {}
+      }
+    }
+  }
+  console.log('Pushed local cache to server for', tid);
 }
 
 async function postState(tourId, seqIdx, stopIdx, state) {
@@ -448,6 +497,7 @@ function cycleStop(el) {
   appState[tid][si][sj] = next;
   el.className = 'stop ' + STATES[next];
   postState(tid, si, sj, next);
+  saveLocal(tid);
   // Update seq count & progress
   const seq = TOURS[tid][si];
   const done = seq.stops.filter((_,j) => (appState[tid][si]?.[j]??0)===2).length;
@@ -466,41 +516,49 @@ function cycleStop(el) {
 }
 
 // ── QR ──
-function drawQR(canvas, label, size) {
-  const ctx = canvas.getContext('2d');
-  const n=21, cs=size/n;
-  ctx.fillStyle='#fff'; ctx.fillRect(0,0,size,size);
-  ctx.fillStyle='#1c1b18';
-  [[0,0],[n-7,0],[0,n-7]].forEach(([ox,oy])=>{
-    for(let r=0;r<7;r++) for(let c=0;c<7;c++){
-      if(r===0||r===6||c===0||c===6||(r>=2&&r<=4&&c>=2&&c<=4))
-        ctx.fillRect((ox+c)*cs,(oy+r)*cs,cs,cs);
-    }
-    ctx.fillStyle='#fff'; ctx.fillRect((ox+1)*cs,(oy+1)*cs,5*cs,5*cs);
-    ctx.fillStyle='#1c1b18'; ctx.fillRect((ox+2)*cs,(oy+2)*cs,3*cs,3*cs);
-  });
-  let h=5381; for(let i=0;i<label.length;i++) h=((h<<5)+h+label.charCodeAt(i))>>>0;
-  for(let y=0;y<n;y++) for(let x=0;x<n;x++){
-    if(!((x<8&&y<8)||(x>n-9&&y<8)||(x<8&&y>n-9)))
-      if((h>>((x*3+y*7)%29))&1) ctx.fillRect(x*cs,y*cs,cs,cs);
+const BASE_URL = 'https://chm-distribution-production.up.railway.app';
+const qrCache = {};
+function drawQR(container, label, size) {
+  // container can be a canvas (legacy) or a div id string
+  const url = BASE_URL + '/?tour=' + label;
+  const divId = 'qrdiv-' + label + '-' + size;
+  // If container is a canvas element, replace with a div
+  let targetEl;
+  if (container && container.tagName === 'CANVAS') {
+    const div = document.createElement('div');
+    div.id = divId;
+    div.style.width = size+'px';
+    div.style.height = size+'px';
+    container.parentNode.replaceChild(div, container);
+    targetEl = div;
+  } else {
+    targetEl = document.getElementById(divId) || container;
   }
-  ctx.fillStyle='#fff'; ctx.fillRect(8*cs,8*cs,5*cs,5*cs);
-  ctx.fillStyle='#1a5fa8';
-  ctx.font=`bold ${cs*0.85}px 'DM Mono',monospace`;
-  ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.fillText(label.replace('CHM_',''), 10.5*cs, 10.5*cs);
+  if (!targetEl) return;
+  targetEl.innerHTML = '';
+  new QRCode(targetEl, {
+    text: url,
+    width: size,
+    height: size,
+    colorDark: '#1c1b18',
+    colorLight: '#ffffff',
+    correctLevel: QRCode.CorrectLevel.M
+  });
 }
 
 function renderQRGrid() {
   const baseUrl = window.location.origin;
   document.getElementById('qr-grid').innerHTML = TOUR_IDS.map(tid => {
     return `<div class="qr-card" onclick="openModal('${tid}')">
-      <canvas id="qr-${tid}" width="100" height="100"></canvas>
+      <div id="qr-${tid}" style="width:100px;height:100px;margin:0 auto"></div>
       <div class="qr-id">${tid}</div>
       <div class="qr-info">${TOURS[tid].length} séq. · ${TOURS[tid].reduce((a,s)=>a+s.stops.length,0)} stops</div>
     </div>`;
   }).join('');
-  requestAnimationFrame(()=>TOUR_IDS.forEach(tid=>{ const c=document.getElementById('qr-'+tid); if(c) drawQR(c,tid,100); }));
+  requestAnimationFrame(()=>TOUR_IDS.forEach(tid=>{
+    const el = document.getElementById('qr-'+tid);
+    if(el){ el.innerHTML=''; new QRCode(el,{text:BASE_URL+'/?tour='+tid,width:100,height:100,colorDark:'#1c1b18',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M}); }
+  }));
 }
 
 function openModal(tid) {
@@ -508,7 +566,9 @@ function openModal(tid) {
   document.getElementById('modal-id').textContent = tid;
   document.getElementById('modal-info').textContent = TOURS[tid].length+' séquences · '+TOURS[tid].reduce((a,s)=>a+s.stops.length,0)+' stops';
   document.getElementById('modal-url').textContent = url;
-  drawQR(document.getElementById('modal-canvas'), tid, 220);
+  const mc = document.getElementById('modal-canvas');
+  mc.innerHTML = '';
+  new QRCode(mc, {text:BASE_URL+'/?tour='+tid, width:220, height:220, colorDark:'#1c1b18', colorLight:'#ffffff', correctLevel:QRCode.CorrectLevel.M});
   document.getElementById('qr-modal').classList.add('open');
 }
 function closeModal(){ document.getElementById('qr-modal').classList.remove('open'); }
@@ -596,6 +656,7 @@ async function validateSeq(btn) {
     btn.classList.toggle('all-done', targetState === 2);
   }
   // Sync to server in one call
+  saveLocal(tid);
   await fetch('/api/validate-seq', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({tourId:tid, seqIdx:si, stopCount:count, state:targetState})
