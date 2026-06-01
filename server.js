@@ -64,10 +64,13 @@ function checkWeeklyReset() {
   if (!row) return;
   const last = new Date(row.last_reset);
   const now = new Date();
-  const lastSunday = new Date(now);
-  lastSunday.setDate(now.getDate() - now.getDay());
-  lastSunday.setHours(0, 0, 0, 0);
-  if (last < lastSunday) archiveAndReset();
+  // Only reset on Sunday (day 0) and only if not already reset this week
+  const isSunday = now.getDay() === 0;
+  if (!isSunday) return;
+  const thisSundayStart = new Date(now);
+  thisSundayStart.setHours(0, 0, 0, 0);
+  // Only reset once per Sunday (last reset was before today)
+  if (last < thisSundayStart) archiveAndReset();
 }
 
 app.use(express.json());
