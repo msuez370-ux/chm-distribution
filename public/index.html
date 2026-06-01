@@ -576,28 +576,17 @@ function closeModal(){ document.getElementById('qr-modal').classList.remove('ope
 // ── DASHBOARD ──
 async function renderDashboard() {
   document.getElementById('dash-date').textContent = new Date().toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  // Always use server data for dashboard — never local cache
   const serverData = await fetchDashboard();
-  // Merge server data into appState for all tours
-  Object.entries(serverData).forEach(([tid, stateMap]) => {
-    if (!appState[tid]) return;
-    // stateMap: {0:count,1:count,2:count,3:count} — just for display
-  });
   let tg=0,ty=0,tr=0,tn=0;
-  // Use local state for loaded tours, server summary for others
   const tourStats = {};
   for (const tid of TOUR_IDS) {
-    const local = getTourStats(tid);
-    // If tour hasn't been loaded locally, use server summary
-    const hasLocal = Object.keys(appState[tid]).length > 0;
-    if (hasLocal) {
-      tourStats[tid] = local;
-    } else if (serverData[tid]) {
+    const total = TOURS[tid].reduce((a,s)=>a+s.stops.length,0);
+    if (serverData[tid]) {
       const sd = serverData[tid];
-      const total = TOURS[tid].reduce((a,s)=>a+s.stops.length,0);
-      const counted = Object.values(sd).reduce((a,v)=>a+v,0);
       tourStats[tid] = { g:sd[2]||0, y:sd[1]||0, r:sd[3]||0, n:total-(sd[2]||0)-(sd[1]||0)-(sd[3]||0), total };
     } else {
-      tourStats[tid] = local;
+      tourStats[tid] = { g:0, y:0, r:0, n:total, total };
     }
     tg+=tourStats[tid].g; ty+=tourStats[tid].y; tr+=tourStats[tid].r; tn+=tourStats[tid].n;
   }
