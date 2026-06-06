@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rapports — CHM Distribution</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f1117;--card:#1a1d27;--card2:#1f2333;--border:#2a2d3e;
+  --text:#e8eaf0;--muted:#7a7f96;--blue:#4a8fe8;--green:#22c55e;
+  --yellow:#f59e0b;--red:#ef4444;--purple:#a855f7;
+  --green-bg:rgba(34,197,94,.1);--red-bg:rgba(239,68,68,.1);--blue-bg:rgba(74,143,232,.1);
+}
+body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg);color:var(--text)}
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@500&display=swap');
+
+/* PIN */
+.pin-screen{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1.5rem;z-index:999}
+.pin-screen.hidden{display:none}
+.pin-dots{display:flex;gap:16px}
+.pin-dot{width:18px;height:18px;border-radius:50%;border:2px solid var(--border);background:transparent;transition:all .15s}
+.pin-dot.filled{background:var(--blue);border-color:var(--blue)}
+.pin-dot.error{background:var(--red);border-color:var(--red)}
+.pin-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:240px}
+.pin-key{padding:18px;background:var(--card);border:1px solid var(--border);border-radius:12px;font-size:22px;font-weight:500;cursor:pointer;text-align:center;font-family:'DM Mono',monospace;color:var(--text)}
+.pin-key:active{transform:scale(.93)}
+.pin-error{font-size:13px;color:var(--red);min-height:20px;text-align:center}
+
+/* LAYOUT */
+.main{display:none}
+.main.visible{display:block}
+header{background:var(--card);border-bottom:1px solid var(--border);padding:14px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50}
+.header-left{display:flex;align-items:center;gap:12px}
+.logo-icon{font-size:28px}
+.logo-text h1{font-size:17px;font-weight:600}
+.logo-text p{font-size:12px;color:var(--muted)}
+.nav-links{display:flex;gap:8px}
+.nav-link{padding:7px 14px;border-radius:8px;font-size:13px;color:var(--muted);text-decoration:none;border:1px solid transparent;cursor:pointer}
+.nav-link:hover{border-color:var(--border);color:var(--text)}
+.nav-link.active{background:var(--blue-bg);color:var(--blue);border-color:var(--blue)}
+
+/* TABS */
+.tab-bar{display:flex;gap:4px;padding:16px 24px 0;border-bottom:1px solid var(--border);background:var(--card)}
+.tab{padding:10px 18px;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s}
+.tab.active{color:var(--blue);border-bottom-color:var(--blue)}
+
+/* CONTENT */
+.content{padding:24px}
+.section-title{font-size:13px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:14px}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px 20px}
+.chart-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin-bottom:16px}
+.chart-card h3{font-size:14px;font-weight:500;margin-bottom:16px;color:var(--text)}
+.chart-wrap{position:relative;height:220px}
+
+/* KPIs */
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
+.kpi{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px 20px}
+.kpi-val{font-size:32px;font-weight:600;font-family:'DM Mono',monospace;line-height:1}
+.kpi-lbl{font-size:11px;color:var(--muted);margin-top:4px}
+.kpi.green .kpi-val{color:var(--green)}
+.kpi.red .kpi-val{color:var(--red)}
+.kpi.blue .kpi-val{color:var(--blue)}
+.kpi.purple .kpi-val{color:var(--purple)}
+
+/* TABLES */
+.data-table{width:100%;border-collapse:collapse;font-size:13px}
+.data-table th{text-align:left;padding:8px 12px;font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)}
+.data-table td{padding:10px 12px;border-bottom:1px solid var(--border)}
+.data-table tr:last-child td{border-bottom:none}
+.data-table tr:hover td{background:var(--card2)}
+.badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:500}
+.badge-red{background:var(--red-bg);color:var(--red)}
+.badge-blue{background:var(--blue-bg);color:var(--blue)}
+.badge-green{background:var(--green-bg);color:var(--green)}
+.resolve-btn{padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);font-size:11px;cursor:pointer;font-family:inherit}
+.resolve-btn:hover{border-color:var(--green);color:var(--green)}
+.count-badge{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:var(--red-bg);color:var(--red);font-size:11px;font-weight:600}
+.empty-state{text-align:center;padding:3rem;color:var(--muted);font-size:14px}
+.snapshot-btn{padding:8px 18px;background:var(--blue);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:500;cursor:pointer;font-family:inherit}
+.snapshot-btn:hover{opacity:.85}
+
+/* FACTEUR TABLE */
+.facteur-bar{height:6px;border-radius:3px;background:var(--border);overflow:hidden;margin-top:4px}
+.facteur-bar-fill{height:100%;background:var(--green);border-radius:3px}
+
+/* LOADING */
+.loading{text-align:center;padding:3rem;color:var(--muted);font-size:14px}
+
+@media(max-width:900px){.kpi-grid{grid-template-columns:repeat(2,1fr)}.grid-2,.grid-3{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<!-- PIN -->
+<div class="pin-screen" id="pin-screen">
+  <div style="font-size:52px">📈</div>
+  <div style="font-size:22px;font-weight:600">Rapports & Analyses</div>
+  <div style="font-size:14px;color:var(--muted)">Accès encadrant</div>
+  <div class="pin-dots" id="pin-dots">
+    <div class="pin-dot" id="pd0"></div><div class="pin-dot" id="pd1"></div>
+    <div class="pin-dot" id="pd2"></div><div class="pin-dot" id="pd3"></div>
+    <div class="pin-dot" id="pd4"></div>
+  </div>
+  <div class="pin-error" id="pin-error"></div>
+  <div class="pin-grid">
+    <button class="pin-key" onclick="pinKey('1')">1</button>
+    <button class="pin-key" onclick="pinKey('2')">2</button>
+    <button class="pin-key" onclick="pinKey('3')">3</button>
+    <button class="pin-key" onclick="pinKey('4')">4</button>
+    <button class="pin-key" onclick="pinKey('5')">5</button>
+    <button class="pin-key" onclick="pinKey('6')">6</button>
+    <button class="pin-key" onclick="pinKey('7')">7</button>
+    <button class="pin-key" onclick="pinKey('8')">8</button>
+    <button class="pin-key" onclick="pinKey('9')">9</button>
+    <button class="pin-key" style="font-size:16px;color:var(--muted)" onclick="pinKey('del')">⌫</button>
+    <button class="pin-key" onclick="pinKey('0')">0</button>
+    <button class="pin-key" style="font-size:16px;color:var(--muted)" onclick="pinKey('clear')">✕</button>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div class="main" id="main">
+  <header>
+    <div class="header-left">
+      <div class="logo-icon">📬</div>
+      <div class="logo-text"><h1>CHM Distribution</h1><p>Rapports & Analyses</p></div>
+    </div>
+    <div class="nav-links">
+      <a class="nav-link" href="/dashboard">📊 Dashboard</a>
+      <a class="nav-link active">📈 Rapports</a>
+    </div>
+  </header>
+
+  <div class="tab-bar">
+    <div class="tab active" onclick="showTab('apercu')">Vue d'ensemble</div>
+    <div class="tab" onclick="showTab('stoppub')">🚫 Stop pub</div>
+    <div class="tab" onclick="showTab('acces')">🔒 Pas d'accès</div>
+    <div class="tab" onclick="showTab('facteurs')">👤 Facteurs</div>
+    <div class="tab" onclick="showTab('hebdo')">📅 Semaines</div>
+  </div>
+
+  <!-- APERÇU -->
+  <div id="tab-apercu" class="content">
+    <div class="kpi-grid">
+      <div class="kpi green"><div class="kpi-val" id="kpi-total-done">—</div><div class="kpi-lbl">Stops livrés cette semaine</div></div>
+      <div class="kpi red"><div class="kpi-val" id="kpi-total-stoppub">—</div><div class="kpi-lbl">Stop pub permanents</div></div>
+      <div class="kpi blue"><div class="kpi-val" id="kpi-total-acces">—</div><div class="kpi-lbl">Problèmes d'accès connus</div></div>
+      <div class="kpi purple"><div class="kpi-val" id="kpi-total-facteurs">—</div><div class="kpi-lbl">Facteurs actifs (7j)</div></div>
+    </div>
+    <div class="grid-2">
+      <div class="chart-card">
+        <h3>Taux de complétion par tournée (semaine en cours)</h3>
+        <div class="chart-wrap"><canvas id="chart-completion"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <h3>Répartition des incidents</h3>
+        <div class="chart-wrap"><canvas id="chart-incidents"></canvas></div>
+      </div>
+    </div>
+    <div class="chart-card">
+      <h3>Évolution hebdomadaire — taux de complétion global</h3>
+      <div class="chart-wrap" style="height:180px"><canvas id="chart-weekly-trend"></canvas></div>
+    </div>
+  </div>
+
+  <!-- STOP PUB -->
+  <div id="tab-stoppub" class="content" style="display:none">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div>
+        <div class="section-title">Liste permanente — Stop pub</div>
+        <p style="font-size:13px;color:var(--muted)">Ces adresses ne reçoivent plus jamais d'IP. Pré-marquées automatiquement en rouge pour les facteurs.</p>
+      </div>
+      <input placeholder="Filtrer..." id="filter-stoppub" oninput="filterTable('stoppub')" style="padding:8px 12px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;outline:none;width:200px">
+    </div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <table class="data-table" id="table-stoppub">
+        <thead><tr>
+          <th>Tournée</th><th>Adresse</th><th>Rue</th>
+          <th>Signalé par</th><th>Vus</th><th>Depuis</th><th>Action</th>
+        </tr></thead>
+        <tbody id="tbody-stoppub"><tr><td colspan="7" class="loading">Chargement…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ACCÈS -->
+  <div id="tab-acces" class="content" style="display:none">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div>
+        <div class="section-title">Problèmes d'accès persistants</div>
+        <p style="font-size:13px;color:var(--muted)">Résidences où l'accès est régulièrement impossible. À traiter en priorité avec la régie.</p>
+      </div>
+      <input placeholder="Filtrer..." id="filter-acces" oninput="filterTable('acces')" style="padding:8px 12px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;outline:none;width:200px">
+    </div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <table class="data-table" id="table-acces">
+        <thead><tr>
+          <th>Tournée</th><th>Adresse</th><th>Rue</th>
+          <th>Signalé par</th><th>Vus</th><th>Depuis</th><th>Action</th>
+        </tr></thead>
+        <tbody id="tbody-acces"><tr><td colspan="7" class="loading">Chargement…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- FACTEURS -->
+  <div id="tab-facteurs" class="content" style="display:none">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div class="section-title">Performance par facteur — 7 derniers jours</div>
+      <button class="snapshot-btn" onclick="takeSnapshot()">📸 Sauvegarder l'avancement du jour</button>
+    </div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <table class="data-table">
+        <thead><tr>
+          <th>Facteur</th><th>Jours travaillés</th><th>Stops livrés</th>
+          <th>Tournées</th><th>Incidents</th><th>Taux moyen</th>
+        </tr></thead>
+        <tbody id="tbody-facteurs"><tr><td colspan="6" class="loading">Chargement…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="chart-card" style="margin-top:16px">
+      <h3>Stops livrés par facteur (7 jours)</h3>
+      <div class="chart-wrap"><canvas id="chart-facteurs"></canvas></div>
+    </div>
+  </div>
+
+  <!-- HEBDO -->
+  <div id="tab-hebdo" class="content" style="display:none">
+    <div class="section-title">Historique des semaines archivées</div>
+    <div id="hebdo-content"><div class="loading">Chargement…</div></div>
+  </div>
+
+</div>
+
+<script>
+const TOUR_META = {"CHM_1111":{"total":226,"seqs":20},"CHM_0707":{"total":497,"seqs":40},"CHM_0404":{"total":418,"seqs":40},"CHM_0202":{"total":358,"seqs":28},"CHM_6003":{"total":335,"seqs":28},"CHM_6002":{"total":344,"seqs":28},"CHM_6001":{"total":211,"seqs":19},"CHM_4007":{"total":349,"seqs":28},"CHM_4006":{"total":345,"seqs":28},"CHM_4005":{"total":354,"seqs":28},"CHM_4003":{"total":333,"seqs":28},"CHM_3030":{"total":487,"seqs":40},"CHM_2929":{"total":446,"seqs":39},"CHM_2727":{"total":283,"seqs":26},"CHM_2626":{"total":460,"seqs":40},"CHM_2323":{"total":420,"seqs":35},"CHM_1919":{"total":500,"seqs":40},"CHM_1616":{"total":493,"seqs":40},"CHM_1414":{"total":254,"seqs":20},"CHM_1313":{"total":346,"seqs":27},"CHM_1212":{"total":243,"seqs":28},"CHM_4004":{"total":214,"seqs":19}};
+const TOUR_IDS  = ["CHM_0202", "CHM_0404", "CHM_0707", "CHM_1111", "CHM_1212", "CHM_1313", "CHM_1414", "CHM_1616", "CHM_1919", "CHM_2323", "CHM_2626", "CHM_2727", "CHM_2929", "CHM_3030", "CHM_4003", "CHM_4004", "CHM_4005", "CHM_4006", "CHM_4007", "CHM_6001", "CHM_6002", "CHM_6003"];
+
+// ── PIN ──
+function simplehash(s){let h=0;for(let i=0;i<s.length;i++)h=(Math.imul(31,h)+s.charCodeAt(i))|0;return Math.abs(h).toString(16).padStart(8,'0')}
+const PIN_CHECK = simplehash('13600');
+let pinBuf='';
+const PIN_LEN=5;
+
+function pinKey(k){
+  document.getElementById('pin-error').textContent='';
+  document.querySelectorAll('.pin-dot').forEach(d=>d.classList.remove('error'));
+  if(k==='del') pinBuf=pinBuf.slice(0,-1);
+  else if(k==='clear') pinBuf='';
+  else if(pinBuf.length<PIN_LEN) pinBuf+=k;
+  for(let i=0;i<PIN_LEN;i++) document.getElementById('pd'+i)?.classList.toggle('filled',i<pinBuf.length);
+  if(pinBuf.length===PIN_LEN) checkPin();
+}
+function checkPin(){
+  if(simplehash(pinBuf)===PIN_CHECK){
+    document.getElementById('pin-screen').classList.add('hidden');
+    document.getElementById('main').classList.add('visible');
+    loadAll();
+  } else {
+    document.querySelectorAll('.pin-dot').forEach(d=>d.classList.add('error'));
+    document.getElementById('pin-error').textContent='Code incorrect';
+    setTimeout(()=>{pinBuf='';for(let i=0;i<PIN_LEN;i++) document.getElementById('pd'+i)?.classList.remove('filled','error');document.getElementById('pin-error').textContent='';},800);
+  }
+}
+
+// ── TABS ──
+let currentTab = 'apercu';
+function showTab(tab){
+  document.querySelectorAll('.tab').forEach((el,i)=>{
+    el.classList.toggle('active',['apercu','stoppub','acces','facteurs','hebdo'][i]===tab);
+  });
+  ['apercu','stoppub','acces','facteurs','hebdo'].forEach(t=>{
+    document.getElementById('tab-'+t).style.display=t===tab?'':'none';
+  });
+  currentTab=tab;
+  if(tab==='facteurs') loadFacteurs();
+  if(tab==='hebdo') loadHebdo();
+}
+
+// ── DATA ──
+let rawData = { stoppub:[], acces:[], facteurs:[], weekly:[], dashboard:null };
+let charts = {};
+
+async function loadAll(){
+  const [dash,sp,ac] = await Promise.all([
+    fetch('/api/dashboard').then(r=>r.json()),
+    fetch('/api/reports/stoppub').then(r=>r.json()),
+    fetch('/api/reports/acces').then(r=>r.json()),
+  ]);
+  rawData.dashboard=dash; rawData.stoppub=sp; rawData.acces=ac;
+  renderKPIs(); renderCompletionChart(); renderIncidentPie(); renderTrendChart();
+  renderIssueTable('stoppub'); renderIssueTable('acces');
+}
+
+async function loadFacteurs(){
+  if(rawData.facteurs.length===0){
+    rawData.facteurs = await fetch('/api/reports/facteurs').then(r=>r.json());
+  }
+  renderFacteurs();
+}
+
+async function loadHebdo(){
+  if(rawData.weekly.length===0){
+    rawData.weekly = await fetch('/api/reports/weekly').then(r=>r.json());
+  }
+  renderHebdo();
+}
+
+// ── KPIs ──
+function renderKPIs(){
+  const dash=rawData.dashboard||{};
+  let totalDone=0;
+  TOUR_IDS.forEach(tid=>{const s=dash.stats?.[tid]||{};totalDone+=(s[2]||0);});
+  document.getElementById('kpi-total-done').textContent=totalDone.toLocaleString('fr-FR');
+  document.getElementById('kpi-total-stoppub').textContent=rawData.stoppub.length;
+  document.getElementById('kpi-total-acces').textContent=rawData.acces.length;
+}
+
+// ── CHART COMPLETION ──
+function renderCompletionChart(){
+  const dash=rawData.dashboard?.stats||{};
+  const labels=[], vals=[], colors=[];
+  TOUR_IDS.forEach(tid=>{
+    const s=dash[tid]||{};
+    const total=TOUR_META[tid]?.total||1;
+    const pct=Math.round((s[2]||0)/total*100);
+    if(pct>0||s[2]||s[3]){
+      labels.push(tid.replace('CHM_',''));
+      vals.push(pct);
+      colors.push(pct>=90?'rgba(34,197,94,.8)':pct>=50?'rgba(245,158,11,.8)':'rgba(239,68,68,.8)');
+    }
+  });
+  if(charts.completion) charts.completion.destroy();
+  charts.completion=new Chart(document.getElementById('chart-completion'),{
+    type:'bar',
+    data:{labels,datasets:[{data:vals,backgroundColor:colors,borderRadius:4}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+      scales:{y:{max:100,ticks:{callback:v=>v+'%',color:'#7a7f96'},grid:{color:'#2a2d3e'}},
+        x:{ticks:{color:'#7a7f96',font:{size:10}},grid:{display:false}}}}
+  });
+}
+
+// ── CHART INCIDENTS ──
+function renderIncidentPie(){
+  const sp=rawData.stoppub.length, ac=rawData.acces.length;
+  if(charts.incidents) charts.incidents.destroy();
+  charts.incidents=new Chart(document.getElementById('chart-incidents'),{
+    type:'doughnut',
+    data:{
+      labels:['Stop pub','Pas d'accès'],
+      datasets:[{data:[sp,ac],backgroundColor:['rgba(74,143,232,.8)','rgba(239,68,68,.8)'],borderWidth:0}]
+    },
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{position:'bottom',labels:{color:'#e8eaf0',padding:20}}}}
+  });
+}
+
+// ── CHART WEEKLY TREND ──
+function renderTrendChart(){
+  if(!rawData.weekly.length){
+    fetch('/api/reports/weekly').then(r=>r.json()).then(data=>{
+      rawData.weekly=data;
+      _drawTrend();
+    });
+  } else _drawTrend();
+}
+function _drawTrend(){
+  const weeks=[...rawData.weekly].reverse();
+  const labels=weeks.map(w=>w.label.replace('Semaine du ',''));
+  const vals=weeks.map(w=>w.totalStops>0?Math.round(w.totalDone/w.totalStops*100):0);
+  if(charts.trend) charts.trend.destroy();
+  charts.trend=new Chart(document.getElementById('chart-weekly-trend'),{
+    type:'line',
+    data:{labels,datasets:[{data:vals,borderColor:'#22c55e',backgroundColor:'rgba(34,197,94,.1)',tension:.3,fill:true,pointBackgroundColor:'#22c55e',pointRadius:4}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+      scales:{y:{max:100,ticks:{callback:v=>v+'%',color:'#7a7f96'},grid:{color:'#2a2d3e'}},
+        x:{ticks:{color:'#7a7f96',font:{size:10}},grid:{display:false}}}}
+  });
+}
+
+// ── ISSUE TABLES ──
+function renderIssueTable(type){
+  const data=rawData[type];
+  const tbody=document.getElementById('tbody-'+type);
+  if(!data.length){
+    tbody.innerHTML=`<tr><td colspan="7" class="empty-state">🎉 Aucun problème ${type==='stoppub'?'stop pub':'d'accès'} enregistré</td></tr>`;
+    return;
+  }
+  tbody.innerHTML=data.map(row=>`
+    <tr data-row="${type}">
+      <td><span style="font-family:'DM Mono',monospace;color:var(--blue);font-size:12px">${row.tour_id}</span></td>
+      <td style="font-weight:500">${row.stop_addr}</td>
+      <td style="color:var(--muted);font-size:12px">${row.stop_street||'—'}</td>
+      <td style="color:var(--muted)">${row.facteur||'—'}</td>
+      <td><span class="count-badge">${row.count_seen}</span></td>
+      <td style="font-size:12px;color:var(--muted)">${new Date(row.first_seen).toLocaleDateString('fr-FR')}</td>
+      <td><button class="resolve-btn" onclick="resolveIssue(${row.id},'${type}')">✓ Résolu</button></td>
+    </tr>`).join('');
+}
+
+function filterTable(type){
+  const val=document.getElementById('filter-'+type).value.toLowerCase();
+  document.querySelectorAll(`#tbody-${type} tr`).forEach(tr=>{
+    tr.style.display=tr.textContent.toLowerCase().includes(val)?'':'none';
+  });
+}
+
+async function resolveIssue(id,type){
+  if(!confirm('Marquer comme résolu ? Le stop sera retiré de la liste permanente.')) return;
+  await fetch('/api/reports/resolve/'+id,{method:'POST'});
+  rawData[type]=rawData[type].filter(r=>r.id!==id);
+  renderIssueTable(type);
+  renderKPIs();
+}
+
+// ── FACTEURS ──
+function renderFacteurs(){
+  const data=rawData.facteurs;
+  const tbody=document.getElementById('tbody-facteurs');
+  if(!data.length){
+    tbody.innerHTML='<tr><td colspan="6" class="empty-state">Aucune donnée facteur — assignez des facteurs aux tournées dans le dashboard puis cliquez "Sauvegarder l'avancement"</td></tr>';
+    return;
+  }
+  const maxDone=Math.max(...data.map(f=>f.total_done),1);
+  tbody.innerHTML=data.map(f=>{
+    const taux=f.total_done>0?Math.round(f.total_done/(f.total_done+f.total_red)*100):0;
+    const pct=Math.round(f.total_done/maxDone*100);
+    return `<tr>
+      <td style="font-weight:600">${f.facteur}</td>
+      <td>${f.jours_travailles}j</td>
+      <td>
+        <div>${f.total_done.toLocaleString('fr-FR')}</div>
+        <div class="facteur-bar"><div class="facteur-bar-fill" style="width:${pct}%"></div></div>
+      </td>
+      <td>${f.nb_tournees}</td>
+      <td>${f.incidents>0?`<span style="color:var(--red)">⚠️ ${f.incidents}</span>`:'<span style="color:var(--muted)">0</span>'}</td>
+      <td><span style="font-weight:600;color:${taux>=90?'var(--green)':taux>=70?'var(--yellow)':'var(--red)'}">${taux}%</span></td>
+    </tr>`;
+  }).join('');
+
+  // Chart facteurs
+  if(charts.facteurs) charts.facteurs.destroy();
+  charts.facteurs=new Chart(document.getElementById('chart-facteurs'),{
+    type:'bar',
+    data:{
+      labels:data.map(f=>f.facteur),
+      datasets:[
+        {label:'Livrés',data:data.map(f=>f.total_done),backgroundColor:'rgba(34,197,94,.7)',borderRadius:4},
+        {label:'Incidents',data:data.map(f=>f.total_red),backgroundColor:'rgba(239,68,68,.7)',borderRadius:4}
+      ]
+    },
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#e8eaf0'}}},
+      scales:{x:{stacked:false,ticks:{color:'#7a7f96'},grid:{display:false}},
+        y:{ticks:{color:'#7a7f96'},grid:{color:'#2a2d3e'}}}}
+  });
+}
+
+// ── HEBDO ──
+function renderHebdo(){
+  const weeks=rawData.weekly;
+  if(!weeks.length){
+    document.getElementById('hebdo-content').innerHTML='<div class="empty-state">Aucune semaine archivée pour le moment</div>';
+    return;
+  }
+  document.getElementById('hebdo-content').innerHTML=weeks.map(w=>{
+    const pct=w.totalStops>0?Math.round(w.totalDone/w.totalStops*100):0;
+    const col=pct>=90?'var(--green)':pct>=60?'var(--yellow)':'var(--red)';
+    const topTours=Object.entries(w.byTour||{}).sort((a,b)=>(b[1].g/b[1].total)-(a[1].g/a[1].total)).slice(0,3);
+    return `<div class="card" style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div>
+          <div style="font-size:15px;font-weight:600">${w.label}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">${w.totalStops} stops au total · ${w.totalRed} incidents</div>
+        </div>
+        <div style="font-size:32px;font-weight:600;font-family:'DM Mono',monospace;color:${col}">${pct}%</div>
+      </div>
+      <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden;margin-bottom:12px">
+        <div style="height:100%;width:${pct}%;background:${col};border-radius:3px"></div>
+      </div>
+      <div style="font-size:12px;color:var(--muted)">Top tournées : ${topTours.map(([tid,s])=>`<span style="color:var(--blue)">${tid}</span> ${s.total>0?Math.round(s.g/s.total*100):0}%`).join(' · ')}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── SNAPSHOT ──
+async function takeSnapshot(){
+  await fetch('/api/daily-snapshot',{method:'POST'});
+  rawData.facteurs=[];
+  loadFacteurs();
+  alert('Avancement du jour sauvegardé ✓');
+}
+
+// ── INIT ──
+function loadAll(){
+  fetch('/api/dashboard').then(r=>r.json()).then(d=>{ rawData.dashboard=d; renderKPIs(); renderCompletionChart(); renderIncidentPie(); renderTrendChart(); });
+  fetch('/api/reports/stoppub').then(r=>r.json()).then(d=>{ rawData.stoppub=d; renderIssueTable('stoppub'); renderKPIs(); renderIncidentPie(); document.getElementById('kpi-total-stoppub').textContent=d.length; });
+  fetch('/api/reports/acces').then(r=>r.json()).then(d=>{ rawData.acces=d; renderIssueTable('acces'); document.getElementById('kpi-total-acces').textContent=d.length; });
+  fetch('/api/reports/facteurs').then(r=>r.json()).then(d=>{ rawData.facteurs=d; document.getElementById('kpi-total-facteurs').textContent=d.length; });
+}
+</script>
+</body>
+</html>
