@@ -343,32 +343,27 @@ function loadLocal(tid) {
 }
 
 async function fetchStates(tid) {
-  // Load local cache first (instant display)
+  // Affichage instantané depuis le cache local en attendant le serveur
   const local = loadLocal(tid);
   if (local) appState[tid] = local;
-  // Then fetch from server and merge (server wins for non-zero states)
+
   try {
     const r = await fetch('/api/states/'+tid);
     const data = await r.json();
-    const serverHasData = Object.keys(data).length > 0;
-    if (serverHasData) {
-      // Server has data — it's the truth
-      appState[tid] = {};
-      Object.entries(data).forEach(([si, stops]) => {
-        appState[tid][si] = {};
-        Object.entries(stops).forEach(([sj, st]) => { appState[tid][si][sj] = parseInt(st); });
+
+    // Le serveur est TOUJOURS la source de vérité, vide ou plein.
+    // Un serveur vide après un reset hebdo est un état légitime, pas une anomalie.
+    appState[tid] = {};
+    Object.entries(data).forEach(([si, stops]) => {
+      appState[tid][si] = {};
+      Object.entries(stops).forEach(([sj, st]) => {
+        appState[tid][si][sj] = { state: st.state, reason: st.reason || '' };
       });
-      saveLocal(tid);
-    } else if (!local) {
-      // Neither server nor local — fresh start
-      appState[tid] = {};
-    }
-    // If server empty but local exists: local was newer (server restarted) — push local to server
-    if (!serverHasData && local) {
-      pushLocalToServer(tid);
-    }
+    });
+    saveLocal(tid); // le cache local est resynchronisé sur le serveur, jamais l'inverse
+
   } catch(e) {
-    console.warn('fetchStates offline, using local cache');
+    console.warn('fetchStates offline, using local cache for', tid);
   }
 }
 
@@ -689,7 +684,7 @@ async function renderDashboard() {
 async function confirmResetAll() {
   if (!confirm('Réinitialiser TOUTES les tournées ? Cette action est irréversible.')) return;
   await fetch('/api/reset-all', {method:'POST'});
-  TOUR_IDS.forEach(tid => { appState[tid]={}; });
+  TOUR_IDS.forEach(tid => { appState[tid]={}; saveLocal(tid); });
   renderDashboard();
   renderHome();
 }
