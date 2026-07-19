@@ -163,14 +163,22 @@ function buildDashboardPayload() {
 }
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+// Les pages HTML ne doivent jamais être servies depuis un cache périmé :
+// les téléphones doivent toujours revalider pour récupérer la dernière version de l'app.
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+  }
+}));
 
 // ── ROUTE DASHBOARD ──
 app.get('/dashboard', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
   res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
 });
 
 app.get('/reports', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, must-revalidate');
   res.sendFile(path.join(__dirname, 'public', 'reports.html'));
 });
 
@@ -189,6 +197,15 @@ app.get('/api/stream', (req, res) => {
   req.on('close', () => { clearInterval(ping); sseClients.delete(res); });
 });
 
+// ── ÉPOQUE DE RESET ──
+// Identifie la "génération" des données. Change à chaque archivage/reset.
+// Permet aux clients de purger leur cache local, et au serveur de refuser
+// les écritures provenant d'une génération périmée (anti-résurrection).
+function currentEpoch() {
+  const row = db.prepare('SELECT last_reset FROM weekly_reset WHERE id=1').get();
+  return row ? row.last_reset : '';
+}
+
 // ── STOPS ──
 app.get('/api/states/:tourId', (req, res) => {
   checkWeeklyReset();
@@ -198,6 +215,7 @@ app.get('/api/states/:tourId', (req, res) => {
     if (!result[r.seq_idx]) result[r.seq_idx] = {};
     result[r.seq_idx][r.stop_idx] = { state: r.state, reason: r.reason || '' };
   });
+  res.setHeader('X-Reset-Epoch', currentEpoch());
   res.json(result);
 });
 
@@ -205,6 +223,10 @@ app.post('/api/state', (req, res) => {
   const { tourId, seqIdx, stopIdx, state } = req.body;
   if (!tourId || seqIdx === undefined || stopIdx === undefined || state === undefined)
     return res.status(400).json({ error: 'Champs manquants' });
+  // Anti-résurrection : refuse toute écriture ne portant pas l'époque courante
+  // (vieux clients en cache qui renvoient les données de la semaine passée)
+  if ((req.body.epoch || '') !== currentEpoch())
+    return res.status(409).json({ error: 'reset', message: 'Données périmées — rescannez le QR code de votre tournée' });
   const reason = req.body.reason || '';
   db.prepare(`
     INSERT INTO stops (tour_id, seq_idx, stop_idx, state, reason, updated_at)
@@ -235,6 +257,8 @@ app.post('/api/validate-seq', (req, res) => {
   const { tourId, seqIdx, stopCount, state } = req.body;
   if (!tourId || seqIdx === undefined || stopCount === undefined)
     return res.status(400).json({ error: 'Champs manquants' });
+  if ((req.body.epoch || '') !== currentEpoch())
+    return res.status(409).json({ error: 'reset', message: 'Données périmées — rescannez le QR code de votre tournée' });
   const targetState = state ?? 2;
   const insert = db.prepare(`
     INSERT INTO stops (tour_id, seq_idx, stop_idx, state, updated_at)
