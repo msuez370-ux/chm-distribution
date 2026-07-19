@@ -555,8 +555,8 @@ function renderTourView() {
 function tapStop(tid, si, sj) {
   si = parseInt(si); sj = parseInt(sj);
   const cur = getStopState(tid, si, sj);
-  // If red (incident), tap resets to none
-  const next = cur === 0 ? 1 : 0; // toggle none↔green; red only via incident popup
+  // Cycle : rien → vert (fait) → rouge (pas fait) → rien
+  const next = cur === 0 ? 1 : cur === 1 ? 2 : 0;
   setStop(tid, si, sj, next, '');
   updateStopUI(tid, si, sj);
   postState(tid, si, sj, next, '');
