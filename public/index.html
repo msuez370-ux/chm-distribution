@@ -351,6 +351,16 @@ async function fetchStates(tid) {
     const r = await fetch('/api/states/'+tid);
     const data = await r.json();
 
+    // Époque de reset : si le serveur a été réinitialisé depuis la dernière
+    // synchro, on purge TOUT le cache local et la file offline (anti-résurrection)
+    const epoch = r.headers.get('X-Reset-Epoch') || '';
+    if (epoch && localStorage.getItem('chm_epoch') !== epoch) {
+      TOUR_IDS.forEach(t => { try { localStorage.removeItem(lsKey(t)); } catch(e){} });
+      try { localStorage.setItem('chm_epoch', epoch); } catch(e){}
+      pendingSync = [];
+      appState[tid] = {};
+    }
+
     // Le serveur est TOUJOURS la source de vérité, vide ou plein.
     // Un serveur vide après un reset hebdo est un état légitime, pas une anomalie.
     appState[tid] = {};
@@ -392,20 +402,27 @@ async function postState(tourId, seqIdx, stopIdx, state, reason='') {
   // Map new states to server states: 0=none, 1=green→2, 2=red→3
   const serverState = state===1?2:state===2?3:0;
   try {
-    await fetch('/api/state', {
+    const r = await fetch('/api/state', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({tourId, seqIdx, stopIdx, state:serverState, reason})
+      body: JSON.stringify({tourId, seqIdx, stopIdx, state:serverState, reason, epoch: localStorage.getItem('chm_epoch')||''})
     });
+    if (r.status === 409) {
+      // Le serveur a été réinitialisé entre-temps → resynchro complète
+      pendingSync = [];
+      await fetchStates(tourId);
+      if (currentTour === tourId) renderTourView();
+    }
   } catch(e) {
-    pendingSync.push({tourId, seqIdx, stopIdx, state:serverState, reason});
+    // File offline : on stocke l'état CLIENT (non converti), postState reconvertira au rejeu
+    pendingSync.push({tourId, seqIdx, stopIdx, state, reason});
   }
 }
 
 async function flushPending() {
   const items = [...pendingSync];
   pendingSync = [];
-  for (const item of items) await postState(item.tourId, item.seqIdx, item.stopIdx, item.state);
+  for (const item of items) await postState(item.tourId, item.seqIdx, item.stopIdx, item.state, item.reason);
 }
 
 async function fetchDashboard() {
@@ -511,7 +528,7 @@ function renderTourView() {
       const sv = getStopState(tid, si, sj);
       const stateClass = sv===1?'green':sv===2?'red':'none';
       const reason = getStopReason(tid, si, sj);
-      const reasonTag = reason==='acces'?'🔒 Pas d'accès':reason==='stoppub'?'🚫 Stop pub':'';
+      const reasonTag = reason==='acces'?'🔒 Pas d\'accès':reason==='stoppub'?'🚫 Stop pub':'';
       return `<div class="stop-row ${stateClass}" id="srow-${tid}-${si}-${sj}">
         <div class="stop-main" onclick="tapStop('${tid}',${si},${sj})">
           <span class="stop-addr">${stop.a}</span>
@@ -556,7 +573,7 @@ function updateStopUI(tid, si, sj) {
   const stateClass = sv===1?'green':sv===2?'red':'none';
   el.className = 'stop-row ' + stateClass;
   const addrEl = el.querySelector('.stop-addr');
-  const reasonTag = reason==='acces'?'🔒 Pas d'accès':reason==='stoppub'?'🚫 Stop pub':'';
+  const reasonTag = reason==='acces'?'🔒 Pas d\'accès':reason==='stoppub'?'🚫 Stop pub':'';
   // Update reason tag
   let rtEl = el.querySelector('.stop-reason-tag');
   if (reasonTag) {
@@ -717,10 +734,17 @@ async function validateSeq(btn) {
   saveLocal(tid);
   // server state: 0=none, 2=green, 3=red
   const serverTargetState = targetState===1?2:0;
-  await fetch('/api/validate-seq', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({tourId:tid, seqIdx:si, stopCount:count, state:serverTargetState})
-  });
+  try {
+    const r = await fetch('/api/validate-seq', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({tourId:tid, seqIdx:si, stopCount:count, state:serverTargetState, epoch: localStorage.getItem('chm_epoch')||''})
+    });
+    if (r.status === 409) {
+      await fetchStates(tid);
+      if (currentTour === tid) renderTourView();
+      return;
+    }
+  } catch(e) {}
   // Update header stats
   const st = getTourStats(tid);
   const tpct = st.total > 0 ? Math.round(st.g/st.total*100) : 0;
@@ -898,7 +922,7 @@ async function confirmIncident() {
   fetch('/api/incidents', {
     method: 'POST',
     headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({ tourId: tid, seqCode, adresse: _incCtx._addr||'', type: reason==='acces'?'Pas d'accès':'Stop pub', commentaire: comment, facteur })
+    body: JSON.stringify({ tourId: tid, seqCode, adresse: _incCtx._addr||'', type: reason==='acces'?'Pas d\'accès':'Stop pub', commentaire: comment, facteur })
   }).catch(()=>{});
   closeIncidentPopup();
 }
