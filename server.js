@@ -81,6 +81,20 @@ db.exec(`
   INSERT OR IGNORE INTO weekly_reset (id) VALUES (1);
 `);
 
+// ── MIGRATION ──
+// Les bases créées par d'anciennes versions du serveur n'ont pas toutes les colonnes
+// (CREATE TABLE IF NOT EXISTS ne modifie jamais une table existante).
+// On ajoute les colonnes manquantes sans toucher aux données.
+function ensureColumn(table, col, ddl) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
+  if (!cols.includes(col)) {
+    db.prepare(`ALTER TABLE ${table} ADD COLUMN ${col} ${ddl}`).run();
+    console.log(`Migration: colonne ${table}.${col} ajoutée`);
+  }
+}
+ensureColumn('stops', 'reason', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('stops', 'updated_at', 'TEXT');
+
 // ── RESET HEBDO ──
 function archiveAndReset() {
   const rows = db.prepare('SELECT * FROM stops').all();
