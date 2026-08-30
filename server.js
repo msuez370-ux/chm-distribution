@@ -95,33 +95,91 @@ function ensureColumn(table, col, ddl) {
 ensureColumn('stops', 'reason', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('stops', 'updated_at', 'TEXT');
 
+// ── FUSEAU HORAIRE (Europe/Paris) ──
+// Railway fait tourner le serveur en UTC ; l'équipe raisonne en heure de Paris.
+// Ces fonctions convertissent sans dépendance externe (Intl est natif à Node).
+
+// Décalage UTC → Paris (heure d'été incluse) à un instant donné, en minutes.
+function parisOffsetMinutes(utcInstant) {
+  const asUTC = new Date(utcInstant.toLocaleString('en-US', { timeZone: 'UTC' }));
+  const asParis = new Date(utcInstant.toLocaleString('en-US', { timeZone: 'Europe/Paris' }));
+  return Math.round((asParis - asUTC) / 60000);
+}
+// Renvoie un Date dont les champs UTC (getUTCDay, getUTCHours...) représentent
+// en réalité l'heure murale de Paris pour l'instant UTC donné. Ne jamais utiliser
+// ce résultat comme un vrai instant (ex: pour l'écrire en base) — voir fromParisWallClock.
+function toParisWallClock(utcInstant) {
+  return new Date(utcInstant.getTime() + parisOffsetMinutes(utcInstant) * 60000);
+}
+// Conversion inverse : un "faux" instant en heure murale de Paris → vrai instant UTC.
+function fromParisWallClock(parisWallClock) {
+  return new Date(parisWallClock.getTime() - parisOffsetMinutes(parisWallClock) * 60000);
+}
+// Lundi 00:00 (heure de Paris) de la semaine contenant l'instant donné (en heure murale de Paris).
+function mondayOfParisWeek(parisWallClock) {
+  const d = new Date(parisWallClock);
+  const day = d.getUTCDay(); // 0=dimanche .. 1=lundi .. 6=samedi
+  d.setUTCDate(d.getUTCDate() - (day === 0 ? 6 : day - 1));
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
+}
+// Lundi 00:01 (heure de Paris) le plus récent qui soit déjà passé, en instant UTC réel.
+// C'est le seuil de déclenchement du reset hebdo : peu importe quel jour de la semaine
+// ce code tourne, on regarde toujours "est-ce que le dernier lundi 00:01 est passé
+// depuis le dernier reset connu ?" plutôt que "sommes-nous dimanche/lundi en ce moment".
+function lastMondayResetUTC() {
+  const parisNow = toParisWallClock(new Date());
+  const monday = mondayOfParisWeek(parisNow);
+  monday.setUTCMinutes(1); // lundi 00:01
+  if (monday > parisNow) monday.setUTCDate(monday.getUTCDate() - 7);
+  return fromParisWallClock(monday);
+}
+
 // ── RESET HEBDO ──
+// Archive les données de la semaine qui vient de se terminer, puis vide les compteurs.
+// L'étiquette de la semaine archivée est calculée à partir de l'ancien last_reset
+// (qui marque le lundi 00:01 où cette semaine a commencé) et non de "maintenant" —
+// sinon un rattrapage tardif (ex: exécuté un mardi car le serveur était éteint
+// lundi) étiquetterait l'archive avec la mauvaise semaine.
 function archiveAndReset() {
   const rows = db.prepare('SELECT * FROM stops').all();
-  if (rows.length === 0) return;
-  const now = new Date();
-  const monday = new Date(now); monday.setDate(now.getDate() - now.getDay() + 1);
-  const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
-  const fmt = d => d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
-  const label = `Semaine du ${fmt(monday)} au ${fmt(sunday)} ${sunday.getFullYear()}`;
-  const byTour = {};
-  rows.forEach(r => {
-    if (!byTour[r.tour_id]) byTour[r.tour_id] = {};
-    if (!byTour[r.tour_id][r.seq_idx]) byTour[r.tour_id][r.seq_idx] = {};
-    byTour[r.tour_id][r.seq_idx][r.stop_idx] = r.state;
-  });
-  db.prepare('INSERT INTO archives (week_label, data) VALUES (?, ?)').run(label, JSON.stringify(byTour));
-  db.prepare('DELETE FROM stops').run();
+  const prevReset = db.prepare('SELECT last_reset FROM weekly_reset WHERE id=1').get();
+
+  const referenceParis = (prevReset && prevReset.last_reset)
+    ? toParisWallClock(new Date(prevReset.last_reset.replace(' ', 'T') + 'Z'))
+    : toParisWallClock(new Date());
+  const monday = mondayOfParisWeek(referenceParis);
+  const sunday = new Date(monday); sunday.setUTCDate(monday.getUTCDate() + 6);
+  const fmt = d => `${String(d.getUTCDate()).padStart(2,'0')}/${String(d.getUTCMonth()+1).padStart(2,'0')}`;
+  const label = `Semaine du ${fmt(monday)} au ${fmt(sunday)} ${sunday.getUTCFullYear()}`;
+
+  if (rows.length > 0) {
+    const byTour = {};
+    rows.forEach(r => {
+      if (!byTour[r.tour_id]) byTour[r.tour_id] = {};
+      if (!byTour[r.tour_id][r.seq_idx]) byTour[r.tour_id][r.seq_idx] = {};
+      byTour[r.tour_id][r.seq_idx][r.stop_idx] = r.state;
+    });
+    db.prepare('INSERT INTO archives (week_label, data) VALUES (?, ?)').run(label, JSON.stringify(byTour));
+    db.prepare('DELETE FROM stops').run();
+  }
+  // Toujours avancer last_reset, même s'il n'y avait rien à archiver — sinon la
+  // vérification périodique ré-essaierait indéfiniment (voir note ci-dessous).
   db.prepare("UPDATE weekly_reset SET last_reset=datetime('now') WHERE id=1").run();
-  console.log('Archive & reset:', label);
+  console.log('Archive & reset:', label, rows.length ? `(${rows.length} stops archivés)` : '(rien à archiver)');
   broadcastDashboard();
 }
 
+// Déclenche le reset dès que le seuil (lundi 00:01 Paris) est franchi depuis le
+// dernier reset connu — quel que soit le jour/l'heure où cette fonction est
+// appelée. Appelée à la fois par le trafic API (ci-dessous) ET par un minuteur
+// serveur indépendant (voir tout en bas du fichier), donc ça ne dépend plus de
+// la présence d'un facteur ou d'un manager sur l'appli le dimanche.
 function checkWeeklyReset() {
   const row = db.prepare('SELECT last_reset FROM weekly_reset WHERE id=1').get();
-  if (!row || new Date().getDay() !== 0) return;
-  const thisSundayStart = new Date(); thisSundayStart.setHours(0,0,0,0);
-  if (new Date(row.last_reset) < thisSundayStart) archiveAndReset();
+  if (!row) return;
+  const lastResetUTC = new Date(row.last_reset.replace(' ', 'T') + 'Z');
+  if (lastResetUTC < lastMondayResetUTC()) archiveAndReset();
 }
 
 // ── SSE — TEMPS RÉEL ──
@@ -462,5 +520,11 @@ app.get('/api/health', (req, res) => {
   const incidents = db.prepare('SELECT COUNT(*) as cnt FROM incidents').get().cnt;
   res.json({ ok: true, db: DB_PATH, stops, incidents });
 });
+
+// Vérification indépendante du trafic : même si aucun facteur ni manager n'ouvre
+// l'appli le lundi matin, le reset hebdomadaire se déclenche tout seul dans les
+// minutes qui suivent lundi 00:01 (heure de Paris), tant que le serveur tourne.
+setInterval(checkWeeklyReset, 5 * 60 * 1000);
+checkWeeklyReset();
 
 app.listen(PORT, () => console.log(`CHM Distribution — port ${PORT} — DB: ${DB_PATH}`));
