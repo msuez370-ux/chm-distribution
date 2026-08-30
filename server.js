@@ -135,6 +135,46 @@ function lastMondayResetUTC() {
   return fromParisWallClock(monday);
 }
 
+// ── NETTOYAGE PONCTUEL DES ARCHIVES ──
+// Deux corrections ponctuelles liées à l'historique du bug de reset hebdo.
+// Les deux sont idempotentes (sans effet si déjà appliquées) et peuvent rester
+// en place sans risque, ou être retirées une fois vérifiées sur Railway.
+
+// 1) Des archives en double (même semaine, créées à quelques minutes d'écart)
+//    proviennent des tests de mise au point de fin mai / début juin 2026.
+//    On ne garde que la plus récente de chaque groupe en double.
+function cleanupDuplicateArchives() {
+  const dupGroups = db.prepare(`
+    SELECT week_label, COUNT(*) as cnt FROM archives GROUP BY week_label HAVING cnt > 1
+  `).all();
+  let removed = 0;
+  dupGroups.forEach(g => {
+    const rows = db.prepare('SELECT id FROM archives WHERE week_label=? ORDER BY id DESC').all(g.week_label);
+    const toDelete = rows.slice(1).map(r => r.id); // garde le plus récent (id max)
+    if (toDelete.length) {
+      const placeholders = toDelete.map(() => '?').join(',');
+      db.prepare(`DELETE FROM archives WHERE id IN (${placeholders})`).run(...toDelete);
+      removed += toDelete.length;
+    }
+  });
+  if (removed > 0) console.log(`Nettoyage archives : ${removed} doublon(s) supprimé(s)`);
+}
+
+// 2) L'archive créée lors du déploiement du correctif du reset hebdo a rattrapé
+//    d'un coup ~6 semaines cumulées (le reset était resté bloqué depuis le
+//    19/07/2026), et portait donc l'étiquette trompeuse "13/07 au 19/07" qui ne
+//    reflète pas la vraie période couverte. On la corrige une seule fois.
+function fixMislabeledCatchupArchive() {
+  const info = db.prepare(`
+    UPDATE archives SET week_label = ?
+    WHERE week_label = 'Semaine du 13/07 au 19/07 2026'
+  `).run('Semaine du 27/07 au 30/08 2026 (rattrapage — plusieurs semaines cumulées, reset resté bloqué avant le correctif)');
+  if (info.changes > 0) console.log('Archive de rattrapage renommée pour refléter la vraie période couverte.');
+}
+
+cleanupDuplicateArchives();
+fixMislabeledCatchupArchive();
+
 // ── RESET HEBDO ──
 // Archive les données de la semaine qui vient de se terminer, puis vide les compteurs.
 // L'étiquette de la semaine archivée est calculée à partir de l'ancien last_reset
@@ -242,6 +282,32 @@ app.use(express.static(path.join(__dirname, 'public'), {
     if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache, must-revalidate');
   }
 }));
+
+// ── DONNÉES DES TOURNÉES (adresses/rues) ──
+// Lues directement depuis la ligne "const TOURS = {...}" de public/index.html
+// au démarrage — jamais recopiées à la main ailleurs, pour qu'il n'existe
+// qu'une seule source de vérité (l'app facteur) et zéro risque de désynchro
+// avec reports.html. Alimente /api/tours, utilisé par la vue "détail" des
+// rapports (rues faites / non faites par tournée archivée).
+let TOURS_DATA = {};
+try {
+  const indexHtml = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
+  const line = indexHtml.split('\n').find(l => l.startsWith('const TOURS = '));
+  if (line) {
+    let jsonStr = line.slice('const TOURS = '.length).trim();
+    if (jsonStr.endsWith(';')) jsonStr = jsonStr.slice(0, -1);
+    TOURS_DATA = JSON.parse(jsonStr);
+    console.log(`Données tournées chargées depuis index.html : ${Object.keys(TOURS_DATA).length} tournées`);
+  } else {
+    console.warn('⚠️  Ligne "const TOURS = " introuvable dans index.html — /api/tours renverra un objet vide.');
+  }
+} catch (e) {
+  console.warn('⚠️  Échec de lecture des données de tournées depuis index.html :', e.message);
+}
+
+app.get('/api/tours', (req, res) => {
+  res.json(TOURS_DATA);
+});
 
 // ── ROUTE DASHBOARD ──
 app.get('/dashboard', (req, res) => {
