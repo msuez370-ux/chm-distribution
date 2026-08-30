@@ -367,7 +367,16 @@ async function fetchStates(tid) {
     Object.entries(data).forEach(([si, stops]) => {
       appState[tid][si] = {};
       Object.entries(stops).forEach(([sj, st]) => {
-        appState[tid][si][sj] = { state: st.state, reason: st.reason || '' };
+        // Le serveur numérote les états différemment du client (0=rien,
+        // 2=fait, 3=incident côté serveur ; 0=rien, 1=fait(vert),
+        // 2=incident(rouge) côté client — voir postState()/pushLocalToServer()
+        // qui font déjà cette conversion dans l'autre sens). Sans cette
+        // conversion ici, un arrêt "fait" (serveur=2) était réaffiché comme
+        // "incident" (client=2 → rouge) dès que l'app resynchronisait avec
+        // le serveur (retour sur la tournée, rescan du QR, etc.) — c'est le
+        // bug "je coche vert, ça redevient rouge".
+        const clientState = st.state === 2 ? 1 : st.state === 3 ? 2 : 0;
+        appState[tid][si][sj] = { state: clientState, reason: st.reason || '' };
       });
     });
     saveLocal(tid); // le cache local est resynchronisé sur le serveur, jamais l'inverse
@@ -565,15 +574,8 @@ function renderTourView() {
 function tapStop(tid, si, sj) {
   si = parseInt(si); sj = parseInt(sj);
   const cur = getStopState(tid, si, sj);
-  // Un tap simple ne fait que basculer fait / non-fait : rien → vert, et
-  // vert OU rouge → rien. Le rouge (incident) ne se déclenche plus que via
-  // le bouton dédié 🚫 (avec un motif obligatoire) — jamais par un tap
-  // normal. Avant ce correctif, un 2e tap sur un arrêt déjà vert le faisait
-  // passer rouge SANS motif : invisible dans les rapports (Stop pub / Pas
-  // d'accès ne comptent que les incidents avec un motif renseigné), et
-  // c'est exactement ce qui donnait l'impression qu'un arrêt coché vert
-  // "redevenait rouge tout seul".
-  const next = cur === 0 ? 1 : 0;
+  // Cycle voulu : rien → vert (fait) → rouge (pas fait) → rien
+  const next = cur === 0 ? 1 : cur === 1 ? 2 : 0;
   setStop(tid, si, sj, next, '');
   updateStopUI(tid, si, sj);
   postState(tid, si, sj, next, '');
