@@ -565,8 +565,15 @@ function renderTourView() {
 function tapStop(tid, si, sj) {
   si = parseInt(si); sj = parseInt(sj);
   const cur = getStopState(tid, si, sj);
-  // Cycle : rien → vert (fait) → rouge (pas fait) → rien
-  const next = cur === 0 ? 1 : cur === 1 ? 2 : 0;
+  // Un tap simple ne fait que basculer fait / non-fait : rien → vert, et
+  // vert OU rouge → rien. Le rouge (incident) ne se déclenche plus que via
+  // le bouton dédié 🚫 (avec un motif obligatoire) — jamais par un tap
+  // normal. Avant ce correctif, un 2e tap sur un arrêt déjà vert le faisait
+  // passer rouge SANS motif : invisible dans les rapports (Stop pub / Pas
+  // d'accès ne comptent que les incidents avec un motif renseigné), et
+  // c'est exactement ce qui donnait l'impression qu'un arrêt coché vert
+  // "redevenait rouge tout seul".
+  const next = cur === 0 ? 1 : 0;
   setStop(tid, si, sj, next, '');
   updateStopUI(tid, si, sj);
   postState(tid, si, sj, next, '');
