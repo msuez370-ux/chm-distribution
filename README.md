@@ -40,7 +40,7 @@ railway up
 ### Résultat final
 - Chaque facteur scanne son QR code → arrive directement sur sa tournée
 - Toutes les modifications sont synchronisées en temps réel
-- Les données se remettent à zéro automatiquement chaque dimanche à minuit
+- Les données se remettent à zéro automatiquement chaque lundi à 00h01 (heure de Paris), même si personne n'ouvre l'appli à ce moment-là — la semaine précédente est archivée avant la remise à zéro
 - Votre dashboard (onglet 📊) montre la progression de toutes les tournées
 
 ## Support
