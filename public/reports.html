@@ -90,6 +90,27 @@ header{background:var(--card);border-bottom:1px solid var(--border);padding:14px
 /* LOADING */
 .loading{text-align:center;padding:3rem;color:var(--muted);font-size:14px}
 
+/* DÉTAIL SEMAINE (rues faites / non faites) */
+.detail-btn{padding:7px 14px;background:var(--blue);border:none;border-radius:8px;color:#fff;font-size:12px;font-weight:500;cursor:pointer;font-family:inherit;margin-top:10px}
+.detail-btn:hover{opacity:.85}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:200;align-items:center;justify-content:center;padding:20px}
+.modal-overlay.open{display:flex}
+.modal{background:var(--card);border:1px solid var(--border);border-radius:16px;width:100%;max-width:920px;max-height:85vh;overflow:hidden;display:flex;flex-direction:column}
+.modal-header{padding:18px 22px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.modal-title{font-size:16px;font-weight:600}
+.modal-sub{font-size:12px;color:var(--muted);margin-top:2px}
+.modal-close{cursor:pointer;color:var(--muted);font-size:20px;line-height:1}
+.modal-controls{padding:14px 22px;border-bottom:1px solid var(--border);display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.modal-select,.modal-input{padding:8px 12px;background:var(--card2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;outline:none;font-family:inherit}
+.modal-select{min-width:150px}
+.modal-input{flex:1;min-width:180px}
+.modal-summary{font-size:12px;color:var(--muted);white-space:nowrap}
+.modal-body{overflow-y:auto}
+.status-badge{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:500;white-space:nowrap}
+.status-badge.done{background:var(--green-bg);color:var(--green)}
+.status-badge.notdone{background:rgba(122,127,150,.15);color:var(--muted)}
+.status-badge.incident{background:var(--red-bg);color:var(--red)}
+
 @media(max-width:900px){.kpi-grid{grid-template-columns:repeat(2,1fr)}.grid-2,.grid-3{grid-template-columns:1fr}}
 </style>
 </head>
@@ -236,6 +257,31 @@ header{background:var(--card);border-bottom:1px solid var(--border);padding:14px
 
 </div>
 
+<!-- DÉTAIL SEMAINE (rues faites / non faites) -->
+<div class="modal-overlay" id="detail-modal" onclick="closeDetailModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title" id="detail-modal-title">Détail semaine</div>
+        <div class="modal-sub">Ce que chaque facteur a coché, rue par rue</div>
+      </div>
+      <span class="modal-close" onclick="closeDetailModal()">✕</span>
+    </div>
+    <div class="modal-controls">
+      <select class="modal-select" id="detail-tour-select" onchange="renderDetailTable()"></select>
+      <input class="modal-input" id="detail-filter-input" placeholder="Filtrer par rue ou adresse…" oninput="renderDetailTable()">
+      <button class="detail-btn" style="margin-top:0" onclick="exportDetailCSV()">⬇️ Export CSV</button>
+      <span class="modal-summary" id="detail-summary"></span>
+    </div>
+    <div class="modal-body">
+      <table class="data-table">
+        <thead><tr><th>Séq.</th><th>Adresse</th><th>Rue</th><th>Statut</th></tr></thead>
+        <tbody id="detail-tbody"><tr><td colspan="4" class="loading">Chargement…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 <script>
 const TOUR_META = {"CHM_1111":{"total":226,"seqs":20},"CHM_0707":{"total":497,"seqs":40},"CHM_0404":{"total":418,"seqs":40},"CHM_0202":{"total":358,"seqs":28},"CHM_6003":{"total":335,"seqs":28},"CHM_6002":{"total":344,"seqs":28},"CHM_6001":{"total":211,"seqs":19},"CHM_4007":{"total":349,"seqs":28},"CHM_4006":{"total":345,"seqs":28},"CHM_4005":{"total":354,"seqs":28},"CHM_4003":{"total":333,"seqs":28},"CHM_3030":{"total":487,"seqs":40},"CHM_2929":{"total":446,"seqs":39},"CHM_2727":{"total":283,"seqs":26},"CHM_2626":{"total":460,"seqs":40},"CHM_2323":{"total":420,"seqs":35},"CHM_1919":{"total":500,"seqs":40},"CHM_1616":{"total":493,"seqs":40},"CHM_1414":{"total":254,"seqs":20},"CHM_1313":{"total":346,"seqs":27},"CHM_1212":{"total":243,"seqs":28},"CHM_4004":{"total":214,"seqs":19}};
 const TOUR_IDS  = ["CHM_0202", "CHM_0404", "CHM_0707", "CHM_1111", "CHM_1212", "CHM_1313", "CHM_1414", "CHM_1616", "CHM_1919", "CHM_2323", "CHM_2626", "CHM_2727", "CHM_2929", "CHM_3030", "CHM_4003", "CHM_4004", "CHM_4005", "CHM_4006", "CHM_4007", "CHM_6001", "CHM_6002", "CHM_6003"];
@@ -351,7 +397,7 @@ function renderIncidentPie(){
   charts.incidents=new Chart(document.getElementById('chart-incidents'),{
     type:'doughnut',
     data:{
-      labels:['Stop pub','Pas d'accès'],
+      labels:['Stop pub',"Pas d'accès"],
       datasets:[{data:[sp,ac],backgroundColor:['rgba(74,143,232,.8)','rgba(239,68,68,.8)'],borderWidth:0}]
     },
     options:{responsive:true,maintainAspectRatio:false,
@@ -387,7 +433,7 @@ function renderIssueTable(type){
   const data=rawData[type];
   const tbody=document.getElementById('tbody-'+type);
   if(!data.length){
-    tbody.innerHTML=`<tr><td colspan="7" class="empty-state">🎉 Aucun problème ${type==='stoppub'?'stop pub':'d'accès'} enregistré</td></tr>`;
+    tbody.innerHTML=`<tr><td colspan="7" class="empty-state">🎉 Aucun problème ${type==='stoppub'?'stop pub':"d'accès"} enregistré</td></tr>`;
     return;
   }
   tbody.innerHTML=data.map(row=>`
@@ -422,7 +468,7 @@ function renderFacteurs(){
   const data=rawData.facteurs;
   const tbody=document.getElementById('tbody-facteurs');
   if(!data.length){
-    tbody.innerHTML='<tr><td colspan="6" class="empty-state">Aucune donnée facteur — assignez des facteurs aux tournées dans le dashboard puis cliquez "Sauvegarder l'avancement"</td></tr>';
+    tbody.innerHTML=`<tr><td colspan="6" class="empty-state">Aucune donnée facteur — assignez des facteurs aux tournées dans le dashboard puis cliquez "Sauvegarder l'avancement"</td></tr>`;
     return;
   }
   const maxDone=Math.max(...data.map(f=>f.total_done),1);
@@ -482,8 +528,102 @@ function renderHebdo(){
         <div style="height:100%;width:${pct}%;background:${col};border-radius:3px"></div>
       </div>
       <div style="font-size:12px;color:var(--muted)">Top tournées : ${topTours.map(([tid,s])=>`<span style="color:var(--blue)">${tid}</span> ${s.total>0?Math.round(s.g/s.total*100):0}%`).join(' · ')}</div>
+      <button class="detail-btn" onclick="openDetailModal(${w.id})">🔍 Voir le détail par rue</button>
     </div>`;
   }).join('');
+}
+
+// ── DÉTAIL SEMAINE (rues faites / non faites) ──
+let TOURS_FULL = null;
+const detailArchiveCache = {}; // id archive -> {tour_id:{seq_idx:{stop_idx:state}}}
+let currentDetail = { weekId: null, label: '' };
+
+async function ensureToursLoaded(){
+  if (!TOURS_FULL) TOURS_FULL = await fetch('/api/tours').then(r=>r.json());
+  return TOURS_FULL;
+}
+
+async function openDetailModal(weekId){
+  const w = rawData.weekly.find(x=>x.id===weekId);
+  currentDetail = { weekId, label: w ? w.label : ('Semaine #'+weekId) };
+  document.getElementById('detail-modal-title').textContent = 'Détail — ' + currentDetail.label;
+  document.getElementById('detail-tbody').innerHTML = '<tr><td colspan="4" class="loading">Chargement…</td></tr>';
+  document.getElementById('detail-modal').classList.add('open');
+
+  await ensureToursLoaded();
+  if (!detailArchiveCache[weekId]) {
+    const arc = await fetch('/api/archives/'+weekId).then(r=>r.json());
+    detailArchiveCache[weekId] = arc.data || {};
+  }
+  const sel = document.getElementById('detail-tour-select');
+  sel.innerHTML = TOUR_IDS.map(tid=>`<option value="${tid}">${tid}</option>`).join('');
+  document.getElementById('detail-filter-input').value = '';
+  renderDetailTable();
+}
+
+function closeDetailModal(e){
+  if (e && e.target !== e.currentTarget) return;
+  document.getElementById('detail-modal').classList.remove('open');
+}
+
+// state archivé : 2=fait(vert), 3=incident(rouge), absent=jamais coché(non fait)
+function getDetailRows(){
+  const tid = document.getElementById('detail-tour-select').value;
+  const seqs = (TOURS_FULL && TOURS_FULL[tid]) || [];
+  const archiveData = (detailArchiveCache[currentDetail.weekId] || {})[tid] || {};
+  const rows = [];
+  seqs.forEach((seq, si) => {
+    (seq.stops||[]).forEach((stop, sj) => {
+      const raw = archiveData[si] ? archiveData[si][sj] : undefined;
+      const state = raw===undefined ? 0 : raw;
+      rows.push({ seq: seq.seq, addr: stop.a, street: stop.s, state });
+    });
+  });
+  return rows;
+}
+
+function renderDetailTable(){
+  const rows = getDetailRows();
+  const filter = document.getElementById('detail-filter-input').value.trim().toLowerCase();
+  const filtered = filter ? rows.filter(r => (r.addr+' '+r.street+' '+r.seq).toLowerCase().includes(filter)) : rows;
+
+  const done = rows.filter(r=>r.state===2).length;
+  const incident = rows.filter(r=>r.state===3).length;
+  const notdone = rows.length - done - incident;
+  document.getElementById('detail-summary').textContent =
+    `${done} fait(s) · ${notdone} non fait(s) · ${incident} incident(s)`;
+
+  const badge = s => s===2
+    ? '<span class="status-badge done">✅ Fait</span>'
+    : s===3
+      ? '<span class="status-badge incident">🔴 Incident</span>'
+      : '<span class="status-badge notdone">⚪ Non fait</span>';
+
+  document.getElementById('detail-tbody').innerHTML = filtered.length ? filtered.map(r => `
+    <tr>
+      <td style="font-family:'DM Mono',monospace;color:var(--blue);font-size:12px">${r.seq}</td>
+      <td style="font-weight:500">${r.addr}</td>
+      <td style="color:var(--muted);font-size:12px">${r.street||'—'}</td>
+      <td>${badge(r.state)}</td>
+    </tr>`).join('') : '<tr><td colspan="4" class="empty-state">Aucun résultat</td></tr>';
+}
+
+function exportDetailCSV(){
+  const tid = document.getElementById('detail-tour-select').value;
+  const rows = getDetailRows();
+  const label = s => s===2 ? 'Fait' : s===3 ? 'Incident' : 'Non fait';
+  const esc = v => '"' + String(v==null?'':v).replace(/"/g,'""') + '"';
+  const csvLines = ['Tournee;Semaine;Sequence;Adresse;Rue;Statut'];
+  rows.forEach(r => {
+    csvLines.push([esc(tid), esc(currentDetail.label), esc(r.seq), esc(r.addr), esc(r.street), esc(label(r.state))].join(';'));
+  });
+  const blob = new Blob(['﻿'+csvLines.join('\n')], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${tid}_${currentDetail.label.replace(/[^\w-]+/g,'_').slice(0,60)}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 // ── SNAPSHOT ──
