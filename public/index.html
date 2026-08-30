@@ -682,7 +682,12 @@ function closeModal(){ document.getElementById('qr-modal').classList.remove('ope
 async function renderDashboard() {
   document.getElementById('dash-date').textContent = new Date().toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
   // Always use server data for dashboard — never local cache
-  const serverData = await fetchDashboard();
+  // /api/dashboard renvoie { stats:{tourId:{...}}, lastUpdate, assignments,
+  // incidents, ts } — les stats par tournée sont dans .stats, pas à la
+  // racine. Sans ce .stats, serverData[tid] était toujours undefined et
+  // "Suivi global" affichait 0 partout quelle que soit la vraie progression.
+  const dashboardPayload = await fetchDashboard();
+  const serverData = dashboardPayload.stats || {};
   let tg=0,ty=0,tr=0,tn=0;
   const tourStats = {};
   for (const tid of TOUR_IDS) {
