@@ -398,7 +398,7 @@ async function pushLocalToServer(tid) {
   console.log('Pushed local cache to server for', tid);
 }
 
-async function postState(tourId, seqIdx, stopIdx, state, reason='') {
+async function postState(tourId, seqIdx, stopIdx, state, reason='', _retry=false) {
   // Map new states to server states: 0=none, 1=green→2, 2=red→3
   const serverState = state===1?2:state===2?3:0;
   try {
@@ -408,10 +408,20 @@ async function postState(tourId, seqIdx, stopIdx, state, reason='') {
       body: JSON.stringify({tourId, seqIdx, stopIdx, state:serverState, reason, epoch: localStorage.getItem('chm_epoch')||''})
     });
     if (r.status === 409) {
-      // Le serveur a été réinitialisé entre-temps → resynchro complète
+      // Le serveur a été réinitialisé entre-temps (époque locale périmée).
+      // Le serveur renvoie la nouvelle époque dans l'en-tête : on la retient
+      // et on REJOUE immédiatement la même action une fois, sinon le tap du
+      // facteur est perdu en silence — l'écran se remet à l'état serveur
+      // sans jamais lui dire que rien n'a été enregistré.
+      const newEpoch = r.headers.get('X-Reset-Epoch') || '';
+      if (newEpoch) { try { localStorage.setItem('chm_epoch', newEpoch); } catch(e){} }
+      if (!_retry) { await postState(tourId, seqIdx, stopIdx, state, reason, true); return; }
+      // La nouvelle tentative a échoué aussi : là on resynchronise pour de
+      // bon et on prévient le facteur que son geste n'a pas été enregistré.
       pendingSync = [];
       await fetchStates(tourId);
       if (currentTour === tourId) renderTourView();
+      alert('Le serveur vient d\'être réinitialisé — veuillez retaper cet arrêt.');
     }
   } catch(e) {
     // File offline : on stocke l'état CLIENT (non converti), postState reconvertira au rejeu
@@ -707,13 +717,22 @@ async function confirmResetAll() {
 }
 
 // ── VALIDATE SEQUENCE ──
-async function validateSeq(btn) {
+async function validateSeq(btn, _retry=false) {
   const tid = btn.dataset.tid;
   const si = parseInt(btn.dataset.si);
   const count = parseInt(btn.dataset.count);
   const seq = TOURS[tid][si];
-  const allDone = seq.stops.every((_,j) => getStopState(tid,si,j) === 1);
-  const targetState = allDone ? 0 : 1; // toggle: 1=green, 0=none
+  // En cas de rejeu (_retry), on garde le même state cible que le 1er essai
+  // (stocké sur le bouton) plutôt que de recalculer allDone, qui aurait déjà
+  // changé après la mise à jour optimiste de l'UI.
+  let targetState;
+  if (_retry && btn.dataset.pendingTarget !== undefined) {
+    targetState = parseInt(btn.dataset.pendingTarget);
+  } else {
+    const allDone = seq.stops.every((_,j) => getStopState(tid,si,j) === 1);
+    targetState = allDone ? 0 : 1; // toggle: 1=green, 0=none
+    btn.dataset.pendingTarget = targetState;
+  }
   if (!appState[tid][si]) appState[tid][si] = {};
   for (let j = 0; j < count; j++) appState[tid][si][j] = targetState;
   // Update UI
@@ -740,11 +759,19 @@ async function validateSeq(btn) {
       body: JSON.stringify({tourId:tid, seqIdx:si, stopCount:count, state:serverTargetState, epoch: localStorage.getItem('chm_epoch')||''})
     });
     if (r.status === 409) {
+      // Époque locale périmée : on retient la nouvelle et on rejoue tout de
+      // suite la même validation une fois, sinon elle est perdue en silence.
+      const newEpoch = r.headers.get('X-Reset-Epoch') || '';
+      if (newEpoch) { try { localStorage.setItem('chm_epoch', newEpoch); } catch(e){} }
+      if (!_retry) { await validateSeq(btn, true); return; }
+      delete btn.dataset.pendingTarget;
       await fetchStates(tid);
       if (currentTour === tid) renderTourView();
+      alert('Le serveur vient d\'être réinitialisé — veuillez retaper "Tout valider".');
       return;
     }
   } catch(e) {}
+  delete btn.dataset.pendingTarget;
   // Update header stats
   const st = getTourStats(tid);
   const tpct = st.total > 0 ? Math.round(st.g/st.total*100) : 0;
