@@ -362,9 +362,13 @@ app.post('/api/state', (req, res) => {
   if (!tourId || seqIdx === undefined || stopIdx === undefined || state === undefined)
     return res.status(400).json({ error: 'Champs manquants' });
   // Anti-résurrection : refuse toute écriture ne portant pas l'époque courante
-  // (vieux clients en cache qui renvoient les données de la semaine passée)
-  if ((req.body.epoch || '') !== currentEpoch())
+  // (vieux clients en cache qui renvoient les données de la semaine passée).
+  // On renvoie la nouvelle époque dans l'en-tête pour que le client puisse
+  // rejouer immédiatement la même action au lieu de perdre le tap du facteur.
+  if ((req.body.epoch || '') !== currentEpoch()) {
+    res.setHeader('X-Reset-Epoch', currentEpoch());
     return res.status(409).json({ error: 'reset', message: 'Données périmées — rescannez le QR code de votre tournée' });
+  }
   const reason = req.body.reason || '';
   db.prepare(`
     INSERT INTO stops (tour_id, seq_idx, stop_idx, state, reason, updated_at)
@@ -395,8 +399,10 @@ app.post('/api/validate-seq', (req, res) => {
   const { tourId, seqIdx, stopCount, state } = req.body;
   if (!tourId || seqIdx === undefined || stopCount === undefined)
     return res.status(400).json({ error: 'Champs manquants' });
-  if ((req.body.epoch || '') !== currentEpoch())
+  if ((req.body.epoch || '') !== currentEpoch()) {
+    res.setHeader('X-Reset-Epoch', currentEpoch());
     return res.status(409).json({ error: 'reset', message: 'Données périmées — rescannez le QR code de votre tournée' });
+  }
   const targetState = state ?? 2;
   const insert = db.prepare(`
     INSERT INTO stops (tour_id, seq_idx, stop_idx, state, updated_at)
