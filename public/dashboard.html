@@ -463,7 +463,7 @@ async function openIncidents(tid){
     const r=await fetch(`/api/incidents?tour_id=${tid}&date=${today}`);
     const data=await r.json();
     if(data.length===0){
-      document.getElementById('panel-content').innerHTML='<div class="no-incidents">Aucun incident aujourd'hui pour cette tournée</div>';
+      document.getElementById('panel-content').innerHTML=`<div class="no-incidents">Aucun incident aujourd'hui pour cette tournée</div>`;
     } else {
       document.getElementById('panel-content').innerHTML=data.map(inc=>`
         <div class="incident-item">
