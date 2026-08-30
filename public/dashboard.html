@@ -58,6 +58,8 @@ header{background:var(--card);border-bottom:1px solid var(--border);padding:14px
 .last-update{font-size:11px;color:var(--muted)}
 .reset-btn-hdr{padding:6px 14px;background:transparent;border:1px solid var(--border);border-radius:8px;color:var(--muted);font-size:12px;cursor:pointer;font-family:inherit}
 .reset-btn-hdr:hover{border-color:var(--red);color:var(--red)}
+.reports-btn-hdr{padding:7px 16px;background:var(--blue);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:6px;margin-right:8px;transition:opacity .15s}
+.reports-btn-hdr:hover{opacity:.85}
 
 /* ── KPI STRIP ── */
 .kpi-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:20px 24px 0}
@@ -185,7 +187,7 @@ header{background:var(--card);border-bottom:1px solid var(--border);padding:14px
         <p>Tableau de bord encadrant</p>
       </div>
     </div>
-    <div class="header-right"><a href="/reports" style="padding:7px 14px;border:1px solid var(--border);border-radius:8px;font-size:13px;color:var(--muted);text-decoration:none;margin-right:8px">📈 Rapports</a>
+    <div class="header-right"><a href="/reports" class="reports-btn-hdr">📈 Rapports</a>
       <div class="live-label"><div class="live-dot"></div>Temps réel</div>
       <div class="last-update" id="last-update">—</div>
       <button class="reset-btn-hdr" onclick="confirmReset()">🔄 Réinitialiser</button>
@@ -274,19 +276,43 @@ let dashData = { stats:{}, lastUpdate:{}, assignments:{}, incidents:{} };
 let saveTimers = {};
 
 // ── SSE ──
+let currentES = null;
+let lastMsgAt = Date.now();
+
 function initDashboard(){
   renderGrid(); // grille vide d'abord
   connectSSE();
+  // Filet de sécurité : le serveur envoie un ping toutes les 25s. Si on ne
+  // reçoit plus rien pendant 70s, la connexion est morte sans que le
+  // navigateur l'ait détecté (coupure wifi, tablette en veille...) — on
+  // force une reconnexion plutôt que de laisser le tableau de bord affiché
+  // figé/désynchronisé indéfiniment.
+  setInterval(() => {
+    if (Date.now() - lastMsgAt > 70000) connectSSE();
+  }, 20000);
+  // Quand l'onglet revient au premier plan (tablette/téléphone réveillé,
+  // changement d'appli...), on force une reconnexion immédiate : ça garantit
+  // les derniers chiffres tout de suite, sans attendre une détection
+  // d'erreur réseau qui peut ne jamais arriver dans ce cas.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') connectSSE();
+  });
 }
 
 function connectSSE(){
+  if (currentES) { try { currentES.close(); } catch(e){} }
   const es = new EventSource('/api/stream');
+  currentES = es;
+  lastMsgAt = Date.now();
   es.onmessage = e => {
+    lastMsgAt = Date.now();
     try { applyPayload(JSON.parse(e.data)); } catch(err){}
   };
   es.onerror = () => {
-    // Reconnexion automatique après 3s
     es.close();
+    if (currentES !== es) return; // déjà remplacée par une connexion plus récente
+    currentES = null;
+    // Reconnexion automatique après 3s
     setTimeout(connectSSE, 3000);
   };
 }
